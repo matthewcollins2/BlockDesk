@@ -3,6 +3,8 @@ import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
 
 import Header from '../components/Header'
+import { Web3Provider } from '../contexts/Web3Context'
+import { NotificationProvider } from '../contexts/NotificationContext'
 
 import appCss from '../styles.css?url'
 
@@ -17,7 +19,7 @@ export const Route = createRootRoute({
         content: 'width=device-width, initial-scale=1',
       },
       {
-        title: 'TanStack Start Starter',
+        title: 'BlockDesk - Blockchain Support Tickets',
       },
     ],
     links: [
@@ -38,8 +40,12 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <HeadContent />
       </head>
       <body>
-        <Header />
-        {children}
+        <NotificationProvider>
+          <Web3Provider>
+            <Header />
+            {children}
+          </Web3Provider>
+        </NotificationProvider>
         <TanStackDevtools
           config={{
             position: 'bottom-right',

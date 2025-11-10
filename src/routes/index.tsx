@@ -1,118 +1,236 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import {
-  Zap,
-  Server,
-  Route as RouteIcon,
+  Ticket,
   Shield,
-  Waves,
-  Sparkles,
+  Zap,
+  FileText,
+  Users,
+  Globe,
+  CheckCircle
 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { useWeb3 } from '@/contexts/Web3Context'
 
 export const Route = createFileRoute('/')({ component: App })
 
 function App() {
+  const { isConnected, user } = useWeb3()
+
   const features = [
     {
-      icon: <Zap className="w-12 h-12 text-cyan-400" />,
-      title: 'Powerful Server Functions',
-      description:
-        'Write server-side code that seamlessly integrates with your client components. Type-safe, secure, and simple.',
-    },
-    {
-      icon: <Server className="w-12 h-12 text-cyan-400" />,
-      title: 'Flexible Server Side Rendering',
-      description:
-        'Full-document SSR, streaming, and progressive enhancement out of the box. Control exactly what renders where.',
-    },
-    {
-      icon: <RouteIcon className="w-12 h-12 text-cyan-400" />,
-      title: 'API Routes',
-      description:
-        'Build type-safe API endpoints alongside your application. No separate backend needed.',
-    },
-    {
       icon: <Shield className="w-12 h-12 text-cyan-400" />,
-      title: 'Strongly Typed Everything',
+      title: 'Blockchain Security',
       description:
-        'End-to-end type safety from server to client. Catch errors before they reach production.',
+        'All tickets are stored immutably on the blockchain, ensuring complete transparency and data integrity.',
     },
     {
-      icon: <Waves className="w-12 h-12 text-cyan-400" />,
-      title: 'Full Streaming Support',
+      icon: <Zap className="w-12 h-12 text-cyan-400" />,
+      title: 'Smart Contract Automation',
       description:
-        'Stream data from server to client progressively. Perfect for AI applications and real-time updates.',
+        'Automated ticket assignment and status updates powered by smart contracts for efficient IT support.',
     },
     {
-      icon: <Sparkles className="w-12 h-12 text-cyan-400" />,
-      title: 'Next Generation Ready',
+      icon: <FileText className="w-12 h-12 text-cyan-400" />,
+      title: 'Complete Audit Trail',
       description:
-        'Built from the ground up for modern web applications. Deploy anywhere JavaScript runs.',
+        'Every action is recorded on-chain with transaction hashes, providing a permanent audit trail.',
+    },
+    {
+      icon: <Users className="w-12 h-12 text-cyan-400" />,
+      title: 'Role-Based Access',
+      description:
+        'Different user roles (User, Agent, Manager) with appropriate permissions for secure ticket management.',
+    },
+    {
+      icon: <Globe className="w-12 h-12 text-cyan-400" />,
+      title: 'IPFS Integration',
+      description:
+        'File attachments are stored on IPFS for decentralized, permanent, and cost-effective storage.',
+    },
+    {
+      icon: <CheckCircle className="w-12 h-12 text-cyan-400" />,
+      title: 'Transparent Process',
+      description:
+        'Users can track ticket progress in real-time with full visibility into all status changes and assignments.',
     },
   ]
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900">
-      <section className="relative py-20 px-6 text-center overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/10 via-blue-500/10 to-purple-500/10"></div>
-        <div className="relative max-w-5xl mx-auto">
-          <div className="flex items-center justify-center gap-6 mb-6">
-            <img
-              src="/tanstack-circle-logo.png"
-              alt="TanStack Logo"
-              className="w-24 h-24 md:w-32 md:h-32"
-            />
-            <h1 className="text-6xl md:text-7xl font-black text-white [letter-spacing:-0.08em]">
-              <span className="text-gray-300">TANSTACK</span>{' '}
-              <span className="bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent">
-                START
-              </span>
-            </h1>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-cyan-50">
+      {/* Hero Section */}
+      <div className="container mx-auto px-4 py-16 text-center">
+        <div className="flex justify-center mb-8">
+          <Ticket size={80} className="text-cyan-500" />
+        </div>
+        
+        <h1 className="text-5xl font-bold text-gray-900 mb-6">
+          BlockDesk
+        </h1>
+        
+        <p className="text-xl text-gray-600 mb-8 max-w-3xl mx-auto">
+          A decentralized IT support desk built on blockchain technology. 
+          Experience transparent, immutable, and efficient ticket management with complete auditability.
+        </p>
+
+        {isConnected && user ? (
+          <div className="space-x-4">
+            <Link to="/dashboard">
+              <Button size="lg" className="bg-cyan-600 hover:bg-cyan-700">
+                View Dashboard
+              </Button>
+            </Link>
+            <Link to="/create-ticket">
+              <Button size="lg" variant="outline">
+                Create New Ticket
+              </Button>
+            </Link>
           </div>
-          <p className="text-2xl md:text-3xl text-gray-300 mb-4 font-light">
-            The framework for next generation AI applications
-          </p>
-          <p className="text-lg text-gray-400 max-w-3xl mx-auto mb-8">
-            Full-stack framework powered by TanStack Router for React and Solid.
-            Build modern applications with server functions, streaming, and type
-            safety.
-          </p>
-          <div className="flex flex-col items-center gap-4">
-            <a
-              href="https://tanstack.com/start"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-8 py-3 bg-cyan-500 hover:bg-cyan-600 text-white font-semibold rounded-lg transition-colors shadow-lg shadow-cyan-500/50"
-            >
-              Documentation
-            </a>
-            <p className="text-gray-400 text-sm mt-2">
-              Begin your TanStack Start journey by editing{' '}
-              <code className="px-2 py-1 bg-slate-700 rounded text-cyan-400">
-                /src/routes/index.tsx
-              </code>
+        ) : (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 max-w-md mx-auto">
+            <p className="text-yellow-800 mb-4">
+              Connect your MetaMask wallet to get started
+            </p>
+            <p className="text-sm text-yellow-600">
+              Make sure you have MetaMask installed and connected to the correct network
             </p>
           </div>
-        </div>
-      </section>
+        )}
+      </div>
 
-      <section className="py-16 px-6 max-w-7xl mx-auto">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {/* Features Grid */}
+      <div className="container mx-auto px-4 py-16">
+        <h2 className="text-3xl font-bold text-center text-gray-900 mb-12">
+          Why Choose BlockDesk?
+        </h2>
+        
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
           {features.map((feature, index) => (
             <div
               key={index}
-              className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl p-6 hover:border-cyan-500/50 transition-all duration-300 hover:shadow-lg hover:shadow-cyan-500/10"
+              className="bg-white rounded-lg p-8 shadow-lg hover:shadow-xl transition-shadow duration-300"
             >
-              <div className="mb-4">{feature.icon}</div>
-              <h3 className="text-xl font-semibold text-white mb-3">
-                {feature.title}
-              </h3>
-              <p className="text-gray-400 leading-relaxed">
-                {feature.description}
-              </p>
+              <div className="flex flex-col items-center text-center">
+                <div className="mb-4">{feature.icon}</div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">
+                  {feature.title}
+                </h3>
+                <p className="text-gray-600 leading-relaxed">
+                  {feature.description}
+                </p>
+              </div>
             </div>
           ))}
         </div>
-      </section>
+      </div>
+
+      {/* How It Works Section */}
+      <div className="bg-gray-50 py-16">
+        <div className="container mx-auto px-4">
+          <h2 className="text-3xl font-bold text-center text-gray-900 mb-12">
+            How It Works
+          </h2>
+          
+          <div className="grid md:grid-cols-3 gap-8">
+            <div className="text-center">
+              <div className="bg-cyan-100 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
+                <span className="text-2xl font-bold text-cyan-600">1</span>
+              </div>
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">Submit Ticket</h3>
+              <p className="text-gray-600">
+                Connect your wallet and submit IT support requests with optional file attachments
+              </p>
+            </div>
+            
+            <div className="text-center">
+              <div className="bg-cyan-100 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
+                <span className="text-2xl font-bold text-cyan-600">2</span>
+              </div>
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">Blockchain Storage</h3>
+              <p className="text-gray-600">
+                Tickets are stored immutably on the blockchain with IPFS for file storage
+              </p>
+            </div>
+            
+            <div className="text-center">
+              <div className="bg-cyan-100 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
+                <span className="text-2xl font-bold text-cyan-600">3</span>
+              </div>
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">Track Progress</h3>
+              <p className="text-gray-600">
+                Monitor real-time updates with complete transparency and audit trail
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Technology Stack */}
+      <div className="container mx-auto px-4 py-16">
+        <h2 className="text-3xl font-bold text-center text-gray-900 mb-12">
+          Built With Modern Technology
+        </h2>
+        
+        <div className="bg-white rounded-lg shadow-lg p-8">
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 text-center">
+            <div>
+              <h3 className="font-semibold text-gray-900 mb-2">Blockchain</h3>
+              <p className="text-sm text-gray-600">Ethereum & Smart Contracts</p>
+            </div>
+            <div>
+              <h3 className="font-semibold text-gray-900 mb-2">Storage</h3>
+              <p className="text-sm text-gray-600">IPFS Decentralized Storage</p>
+            </div>
+            <div>
+              <h3 className="font-semibold text-gray-900 mb-2">Wallet</h3>
+              <p className="text-sm text-gray-600">MetaMask Integration</p>
+            </div>
+            <div>
+              <h3 className="font-semibold text-gray-900 mb-2">Frontend</h3>
+              <p className="text-sm text-gray-600">React & TanStack Router</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Call to Action */}
+      <div className="bg-cyan-600 text-white py-16">
+        <div className="container mx-auto px-4 text-center">
+          <h2 className="text-3xl font-bold mb-4">
+            Ready to Experience Decentralized IT Support?
+          </h2>
+          <p className="text-xl mb-8 text-cyan-100">
+            Join the future of transparent and secure ticket management
+          </p>
+          
+          {isConnected && user ? (
+            <Link to="/create-ticket">
+              <Button size="lg" variant="secondary">
+                Create Your First Ticket
+              </Button>
+            </Link>
+          ) : (
+            <Button size="lg" variant="secondary" disabled>
+              Connect Wallet to Get Started
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Footer */}
+      <footer className="bg-gray-800 text-white py-8">
+        <div className="container mx-auto px-4 text-center">
+          <div className="flex items-center justify-center gap-2 mb-4">
+            <Ticket size={24} className="text-cyan-400" />
+            <span className="text-lg font-semibold">BlockDesk</span>
+          </div>
+          <p className="text-gray-400 mb-4">
+            Built by Chris Vo, Matthew Collins, Shu Zhang
+          </p>
+          <div className="text-sm text-gray-500">
+            <p>Academic Project • Blockchain Development • Smart Contracts</p>
+          </div>
+        </div>
+      </footer>
     </div>
   )
 }
