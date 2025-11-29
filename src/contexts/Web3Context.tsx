@@ -1,4 +1,4 @@
-﻿import { createContext, useContext, useState, ReactNode } from 'react';
+﻿import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { ethers } from 'ethers';
 import { User, UserRole } from '../types';
 
@@ -40,7 +40,8 @@ export function Web3Provider({ children }: { children: ReactNode }) {
         const getUserRole = (address: string): UserRole => {
           // Manager addresses (full admin access) - SPECIFIC ADDRESSES ONLY
           const managerAddresses = [
-            '0x2580fd5d3652b9fce4c7f14f30bbb77e5aeafd7d', // Your wallet address - ADMIN
+            '0x2580fd5d3652b9fce4c7f14f30bbb77e5aeafd7d',
+            '0xaafe300907bea569970928719c88948e2b56915e', // Your wallet address - ADMIN
             // Add more specific manager addresses here if needed
           ];
           
@@ -92,6 +93,28 @@ export function Web3Provider({ children }: { children: ReactNode }) {
     setSigner(null);
     setContract(null);
   };
+
+  // Listen for account changes in MetaMask
+  useEffect(() => {
+    if (window.ethereum && isConnected) {
+      const handleAccountsChanged = async (accounts: string[]) => {
+        if (accounts.length === 0) {
+          // User disconnected their wallet
+          disconnectWallet();
+        } else if (accounts[0] !== user?.address) {
+          // Account switched - disconnect and require reconnection
+          disconnectWallet();
+          alert('MetaMask account changed. Please connect your wallet again.');
+        }
+      };
+
+      window.ethereum.on('accountsChanged', handleAccountsChanged);
+
+      return () => {
+        window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
+      };
+    }
+  }, [user?.address, isConnected]);
 
   const value: Web3ContextType = {
     isConnected,

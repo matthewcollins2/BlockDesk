@@ -37,28 +37,17 @@ function TicketDetails() {
   const loadTicketDetails = async () => {
     setLoading(true);
     try {
-<<<<<<< HEAD
       // Load from localStorage and find our ticket
       const userTickets = JSON.parse(localStorage.getItem('blockdesk-tickets') || '[]');
       
       // Find the ticket by ID (from user tickets only)
-=======
-      // Load tickets from localStorage and find the specific ticket
-      const userTickets = JSON.parse(localStorage.getItem('blockdesk-tickets') || '[]');
-      
-      // Find the specific ticket by ID (only from user-created tickets)
->>>>>>> 5531b19806838d3415103cadade86026ff0a3927
       const foundTicket = userTickets.find((t: any) => t.id === ticketId);
       
       if (!foundTicket) {
         throw new Error('Ticket not found');
       }
       
-<<<<<<< HEAD
       // TODO: use real contract when deployed
-=======
-      // TODO: Replace with actual contract calls when deployed
->>>>>>> 5531b19806838d3415103cadade86026ff0a3927
       // if (contract) {
       //   const ticketData = await contract.getTicket(ticketId);
       //   const events = await contract.getTicketEvents(ticketId);
@@ -98,23 +87,36 @@ function TicketDetails() {
   };
 
   const updateTicketStatus = async (newStatus: TicketStatus) => {
-    if (!contract || !ticket) return;
+    if (!ticket) return;
 
     setUpdating(true);
     try {
       addNotification({
         type: 'info',
         title: 'Updating Status...',
-        message: 'Please confirm the transaction in MetaMask',
+        message: 'Processing status update',
         duration: 0
       });
+
+      // Update ticket in localStorage
+      const userTickets = JSON.parse(localStorage.getItem('blockdesk-tickets') || '[]');
+      const updatedTickets = userTickets.map((ticket: any) => {
+        if (ticket.id === ticketId) {
+          return {
+            ...ticket,
+            status: newStatus
+          };
+        }
+        return ticket;
+      });
+      localStorage.setItem('blockdesk-tickets', JSON.stringify(updatedTickets));
 
       // TODO: Call smart contract
       // const tx = await contract.updateStatus(ticketId, newStatus);
       // await tx.wait();
 
       // Simulate transaction
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       addNotification({
         type: 'success',
@@ -270,40 +272,23 @@ function TicketDetails() {
             {ticket.attachment && (
               <div className="mt-4 pt-4 border-t">
                 <h3 className="text-sm font-medium text-gray-700 mb-2">Attachment</h3>
-                <div className="flex items-center gap-2 text-sm text-blue-600">
-                  <Paperclip size={16} />
-                  <a 
-                    href={`https://ipfs.io/ipfs/${ticket.attachment}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="hover:underline"
-                  >
-                    View File ({ticket.attachment})
-                  </a>
+                <div className="flex items-center gap-2 p-3 bg-gray-50 rounded border">
+                  <Paperclip size={16} className="text-gray-500" />
+                  <div className="flex-1">
+                    <p className="text-sm text-gray-700">
+                      File attached (Demo mode - actual file not uploaded)
+                    </p>
+                    <p className="text-xs text-gray-500 font-mono mt-1">
+                      IPFS Hash: {ticket.attachment}
+                    </p>
+                  </div>
                 </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  Note: Files will be uploaded to IPFS when smart contract is deployed
+                </p>
               </div>
             )}
           </div>
-
-          {/* Action Panel */}
-          {canUpdateStatus() && (
-            <div className="bg-white rounded-lg shadow-sm border p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Actions</h2>
-              <div className="space-y-3">
-                {getNextStatuses().map((status) => (
-                  <Button
-                    key={status}
-                    onClick={() => updateTicketStatus(status)}
-                    disabled={updating}
-                    className="mr-2"
-                  >
-                    <Edit size={16} />
-                    Update to {status}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* Event History */}
           <div className="bg-white rounded-lg shadow-sm border p-6">
