@@ -2,18 +2,21 @@ import { createFileRoute, useNavigate, useParams } from '@tanstack/react-router'
 import { useState, useEffect } from 'react';
 import { 
   ArrowLeft, 
-  Edit, 
   Paperclip,
   Clock,
   AlertCircle,
   CheckCircle,
   Pause,
-  XCircle
+  XCircle,
+  User as UserIcon,
+  Play,
+  Shield
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useWeb3 } from '@/contexts/Web3Context';
 import { useNotifications } from '@/contexts/NotificationContext';
-import { Ticket, TicketStatus, TicketEvent, UserRole } from '@/types';
+import { Ticket, TicketStatus, UserRole, TicketEvent } from '@/types';
+import { mapStatus } from '@/lib/utils';
 
 export const Route = createFileRoute('/ticket/$ticketId')({
   component: TicketDetails,
@@ -21,7 +24,7 @@ export const Route = createFileRoute('/ticket/$ticketId')({
 
 function TicketDetails() {
   const { ticketId } = useParams({ from: '/ticket/$ticketId' });
-  const { user, contract } = useWeb3();
+  const { user, contract, isConnected } = useWeb3();
   const { addNotification } = useNotifications();
   const navigate = useNavigate();
   
@@ -31,108 +34,154 @@ function TicketDetails() {
   const [updating, setUpdating] = useState(false);
 
   useEffect(() => {
-    loadTicketDetails();
+    if (contract && ticketId) {
+      loadTicketDetails();
+      loadTicketHistory();
+    }
   }, [ticketId, contract]);
 
   const loadTicketDetails = async () => {
     setLoading(true);
     try {
-      // Load tickets from localStorage and find the specific ticket
-      const userTickets = JSON.parse(localStorage.getItem('blockdesk-tickets') || '[]');
+      if (!contract) return;
       
-      // Find the specific ticket by ID (only from user-created tickets)
-      const foundTicket = userTickets.find((t: any) => t.id === ticketId);
+      const rawTicket = await contract.getTicket(ticketId);
       
-      if (!foundTicket) {
+      if (rawTicket.id.toString() === "0") {
         throw new Error('Ticket not found');
       }
+
+      const formattedTicket: Ticket = {
+        id: rawTicket.id.toString(),
+        title: rawTicket.title,
+        description: rawTicket.description,
+        status: mapStatus(Number(rawTicket.status)) as TicketStatus,
+        creator: rawTicket.creator,
+        assignedTo: rawTicket.assignedTo === '0x0000000000000000000000000000000000000000' ? undefined : rawTicket.assignedTo,
+        attachment: rawTicket.attachmentHash,
+        createdAt: Number(rawTicket.createdAt) * 1000,
+      };
       
-      // TODO: Replace with actual contract calls when deployed
-      // if (contract) {
-      //   const ticketData = await contract.getTicket(ticketId);
-      //   const events = await contract.getTicketEvents(ticketId);
-      //   setTicket(parseTicketFromContract(ticketData));
-      //   setTicketEvents(parseEventsFromContract(events));
-      // }
-      
-      // Simulate loading delay
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      setTicket(foundTicket);
-      
-      // Create events for the ticket
-      const events = [
-        {
-          id: "1",
-          ticketId: ticketId,
-          eventType: "Ticket Created",
-          actor: foundTicket.creator,
-          timestamp: foundTicket.createdAt,
-          transactionHash: `0x${Math.random().toString(16).substring(2, 66)}`,
-          data: { title: foundTicket.title }
-        }
-      ];
-      
-      setTicketEvents(events);
+      setTicket(formattedTicket);
     } catch (error) {
-      console.error('Error loading ticket details:', error);
-      addNotification({
-        type: 'error',
-        title: 'Failed to load ticket',
-        message: 'Unable to fetch ticket details'
-      });
+      console.error('Error loading ticket:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  const updateTicketStatus = async (newStatus: TicketStatus) => {
-    if (!ticket) return;
+  const loadTicketHistory = async () => {
+    if (!contract) return;
+    try {
+      // Fetch events for this ticket ID
+      const filterCreated = contract.filters.TicketCreated(ticketId);
+      const filterStatus = contract.filters.StatusUpdated(ticketId);
+      const filterAssigned = contract.filters.TicketAssigned(ticketId);
 
+      const [createdLogs, statusLogs, assignedLogs] = await Promise.all([
+        contract.queryFilter(filterCreated),
+        contract.queryFilter(filterStatus),
+        contract.queryFilter(filterAssigned)
+      ]);
+
+      const events: TicketEvent[] = [];
+
+      // Process Created Events
+      for (const log of createdLogs) {
+        const block = await log.getBlock();
+        events.push({
+          id: log.transactionHash,
+          ticketId,
+          eventType: 'Ticket Created',
+          actor: (log as any).args[1],
+          timestamp: block.timestamp * 1000,
+          transactionHash: log.transactionHash
+        });
+      }
+
+      // Process Status Updates
+      for (const log of statusLogs) {
+        const block = await log.getBlock();
+        const statusIdx = Number((log as any).args[1]);
+        events.push({
+          id: log.transactionHash,
+          ticketId,
+          eventType: `Status: ${mapStatus(statusIdx)}`,
+          actor: (log as any).args[2],
+          timestamp: block.timestamp * 1000,
+          transactionHash: log.transactionHash
+        });
+      }
+
+      // Process Assignments
+      for (const log of assignedLogs) {
+        const block = await log.getBlock();
+        events.push({
+          id: log.transactionHash,
+          ticketId,
+          eventType: 'Ticket Assigned',
+          actor: (log as any).args[2],
+          timestamp: block.timestamp * 1000,
+          transactionHash: log.transactionHash,
+          data: { assignee: (log as any).args[1] }
+        });
+      }
+
+      setTicketEvents(events.sort((a, b) => b.timestamp - a.timestamp));
+    } catch (e) {
+      console.warn("Could not fetch history:", e);
+    }
+  };
+
+  // Combined "Start Work" Action
+  // Assigns to self AND sets status to In Progress
+  const handleStartWork = async () => {
+    if (!contract || !user) return;
     setUpdating(true);
     try {
-      addNotification({
-        type: 'info',
-        title: 'Updating Status...',
-        message: 'Processing status update',
-        duration: 0
-      });
-
-      // Update ticket in localStorage
-      const userTickets = JSON.parse(localStorage.getItem('blockdesk-tickets') || '[]');
-      const updatedTickets = userTickets.map((ticket: any) => {
-        if (ticket.id === ticketId) {
-          return {
-            ...ticket,
-            status: newStatus
-          };
-        }
-        return ticket;
-      });
-      localStorage.setItem('blockdesk-tickets', JSON.stringify(updatedTickets));
-
-      // TODO: Call smart contract
-      // const tx = await contract.updateStatus(ticketId, newStatus);
-      // await tx.wait();
-
-      // Simulate transaction
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      addNotification({
-        type: 'success',
-        title: 'Status Updated',
-        message: `Ticket status changed to ${newStatus}`
-      });
-
-      // Reload ticket data
+      // Calling assignTicket with current user address
+      // This sets status to InProgress and assignedTo to user
+      const tx = await contract.assignTicket(ticketId, user.address, { gasLimit: 500000 });
+      await tx.wait();
+      
+      addNotification({ type: 'success', title: 'Work Started', message: 'Ticket assigned to you and marked In Progress' });
       loadTicketDetails();
-
+      loadTicketHistory();
     } catch (error: any) {
-      addNotification({
-        type: 'error',
-        title: 'Update Failed',
-        message: error.message
-      });
+      console.error(error);
+      addNotification({ type: 'error', title: 'Error', message: error.reason || error.message });
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleUpdateStatus = async (newStatus: TicketStatus) => {
+    if (!contract) return;
+    setUpdating(true);
+    try {
+      let tx;
+      const options = { gasLimit: 500000 };
+
+      if (newStatus === TicketStatus.RESOLVED) {
+        tx = await contract.resolveTicket(ticketId, options);
+      } else if (newStatus === TicketStatus.CLOSED) {
+        tx = await contract.closeTicket(ticketId, options);
+      } else {
+        // Fallback for other status updates if needed
+        let statusIdx = 0;
+        if(newStatus === TicketStatus.IN_PROGRESS) statusIdx = 1;
+        if(newStatus === TicketStatus.RESOLVED) statusIdx = 2;
+        if(newStatus === TicketStatus.CLOSED) statusIdx = 3;
+        tx = await contract.updateStatus(ticketId, statusIdx, options);
+      }
+      
+      await tx.wait();
+      addNotification({ type: 'success', title: 'Updated', message: `Status changed to ${newStatus}` });
+      loadTicketDetails();
+      loadTicketHistory();
+    } catch (error: any) {
+      console.error(error);
+      addNotification({ type: 'error', title: 'Error', message: error.reason || error.message });
     } finally {
       setUpdating(false);
     }
@@ -140,118 +189,104 @@ function TicketDetails() {
 
   const getStatusIcon = (status: TicketStatus) => {
     switch (status) {
-      case TicketStatus.OPEN:
-        return <AlertCircle className="text-red-500" size={24} />;
-      case TicketStatus.IN_PROGRESS:
-        return <Pause className="text-yellow-500" size={24} />;
-      case TicketStatus.RESOLVED:
-        return <CheckCircle className="text-green-500" size={24} />;
-      case TicketStatus.CLOSED:
-        return <XCircle className="text-gray-500" size={24} />;
-      default:
-        return <Clock className="text-gray-400" size={24} />;
+      case TicketStatus.OPEN: return <AlertCircle className="text-red-500" size={24} />;
+      case TicketStatus.IN_PROGRESS: return <Pause className="text-yellow-500" size={24} />;
+      case TicketStatus.RESOLVED: return <CheckCircle className="text-green-500" size={24} />;
+      case TicketStatus.CLOSED: return <XCircle className="text-gray-500" size={24} />;
+      default: return <Clock className="text-gray-400" size={24} />;
     }
   };
 
   const getStatusBadgeClass = (status: TicketStatus) => {
     switch (status) {
-      case TicketStatus.OPEN:
-        return "bg-red-100 text-red-800 border-red-200";
-      case TicketStatus.IN_PROGRESS:
-        return "bg-yellow-100 text-yellow-800 border-yellow-200";
-      case TicketStatus.RESOLVED:
-        return "bg-green-100 text-green-800 border-green-200";
-      case TicketStatus.CLOSED:
-        return "bg-gray-100 text-gray-800 border-gray-200";
-      default:
-        return "bg-gray-100 text-gray-500 border-gray-200";
+      case TicketStatus.OPEN: return "bg-red-100 text-red-800 border-red-200";
+      case TicketStatus.IN_PROGRESS: return "bg-yellow-100 text-yellow-800 border-yellow-200";
+      case TicketStatus.RESOLVED: return "bg-green-100 text-green-800 border-green-200";
+      case TicketStatus.CLOSED: return "bg-gray-100 text-gray-800 border-gray-200";
+      default: return "bg-gray-100 text-gray-500 border-gray-200";
     }
   };
 
-  const formatAddress = (address: string) => {
-    return `${address.slice(0, 6)}...${address.slice(-4)}`;
-  };
+  const formatAddress = (address: string) => `${address.slice(0, 6)}...${address.slice(-4)}`;
+  const formatDate = (ts: number) => new Date(ts).toLocaleString();
 
-  const formatDate = (timestamp: number) => {
-    return new Date(timestamp).toLocaleString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
-
-  const canUpdateStatus = () => {
-    return user && user.role === UserRole.MANAGER && ticket?.status !== TicketStatus.CLOSED;
-  };
-
-  const getNextStatuses = () => {
-    if (!ticket) return [];
-    
-    switch (ticket.status) {
-      case TicketStatus.OPEN:
-        return [TicketStatus.IN_PROGRESS];
-      case TicketStatus.IN_PROGRESS:
-        return [TicketStatus.RESOLVED];
-      case TicketStatus.RESOLVED:
-        return [TicketStatus.CLOSED];
-      default:
-        return [];
-    }
-  };
+  if (!isConnected || !user) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 text-center">
+          <UserIcon size={48} className="mx-auto mb-4 text-yellow-600" />
+          <h2 className="text-xl font-semibold text-yellow-800 mb-2">Wallet Connection Required</h2>
+          <p className="text-yellow-700">Please connect your wallet to view ticket details.</p>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex items-center justify-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-500"></div>
-          <span className="ml-2 text-gray-600">Loading ticket details...</span>
-        </div>
+      <div className="container mx-auto px-4 py-8 text-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-500 mx-auto mb-4"></div>
+        <p className="text-gray-600">Loading ticket details...</p>
       </div>
     );
   }
 
   if (!ticket) {
     return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="text-center py-12">
-          <AlertCircle size={48} className="mx-auto text-gray-400 mb-4" />
-          <h2 className="text-xl font-semibold text-gray-700 mb-2">Ticket Not Found</h2>
-          <p className="text-gray-500 mb-4">The requested ticket could not be found.</p>
-          <Button onClick={() => navigate({ to: '/dashboard' })}>
-            <ArrowLeft size={16} />
-            Back to Dashboard
-          </Button>
-        </div>
+      <div className="container mx-auto px-4 py-8 text-center">
+        <AlertCircle size={48} className="mx-auto text-gray-400 mb-4" />
+        <h2 className="text-xl font-semibold text-gray-700 mb-2">Ticket Not Found</h2>
+        <Button onClick={() => navigate({ to: '/dashboard' })}>Back to Dashboard</Button>
       </div>
     );
   }
+
+  const isManager = user.role === UserRole.MANAGER;
+  // If assigned to current user, they can work on it
+  const isAssignedToMe = ticket.assignedTo?.toLowerCase() === user.address.toLowerCase();
 
   return (
     <div className="container mx-auto px-4 py-8">
       {/* Header */}
       <div className="mb-6">
-        <Button
-          variant="ghost"
-          onClick={() => navigate({ to: '/dashboard' })}
-          className="mb-4"
-        >
-          <ArrowLeft size={16} />
-          Back to Dashboard
+        <Button variant="ghost" onClick={() => navigate({ to: '/dashboard' })} className="mb-4">
+          <ArrowLeft size={16} className="mr-2"/> Back to Dashboard
         </Button>
         
-        <div className="flex items-start justify-between">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            <h1 className="text-3xl font-bold text-gray-900 mb-2 flex items-center gap-3">
               Ticket #{ticket.id}
+              <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium border ${getStatusBadgeClass(ticket.status)}`}>
+                {getStatusIcon(ticket.status)}
+                {ticket.status}
+              </span>
             </h1>
             <p className="text-xl text-gray-700">{ticket.title}</p>
           </div>
-          
-          <div className={`inline-flex items-center gap-2 px-3 py-2 rounded-full text-sm font-medium border ${getStatusBadgeClass(ticket.status)}`}>
-            {getStatusIcon(ticket.status)}
-            {ticket.status}
+
+          {/* Action Buttons */}
+          <div className="flex gap-2">
+            {/* Button 1: Start Work (Assignments are automatic) */}
+            {ticket.status === TicketStatus.OPEN && isManager && (
+              <Button onClick={handleStartWork} disabled={updating} className="bg-cyan-600 hover:bg-cyan-700">
+                <Play size={16} className="mr-2" /> Start Work
+              </Button>
+            )}
+
+            {/* Button 2: Resolve (If In Progress and Assigned to Me or Manager) */}
+            {ticket.status === TicketStatus.IN_PROGRESS && (isAssignedToMe || isManager) && (
+              <Button onClick={() => handleUpdateStatus(TicketStatus.RESOLVED)} disabled={updating} className="bg-green-600 hover:bg-green-700">
+                <CheckCircle size={16} className="mr-2" /> Resolve Ticket
+              </Button>
+            )}
+
+            {/* Button 3: Close (If Resolved and Manager) */}
+            {ticket.status === TicketStatus.RESOLVED && isManager && (
+              <Button onClick={() => handleUpdateStatus(TicketStatus.CLOSED)} disabled={updating} variant="destructive">
+                <XCircle size={16} className="mr-2" /> Close Ticket
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -259,7 +294,6 @@ function TicketDetails() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Main Content */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Ticket Details */}
           <div className="bg-white rounded-lg shadow-sm border p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Description</h2>
             <p className="text-gray-700 whitespace-pre-wrap leading-relaxed">
@@ -272,62 +306,53 @@ function TicketDetails() {
                 <div className="flex items-center gap-2 p-3 bg-gray-50 rounded border">
                   <Paperclip size={16} className="text-gray-500" />
                   <div className="flex-1">
-                    <p className="text-sm text-gray-700">
-                      File attached (Demo mode - actual file not uploaded)
-                    </p>
-                    <p className="text-xs text-gray-500 font-mono mt-1">
-                      IPFS Hash: {ticket.attachment}
-                    </p>
+                    <p className="text-sm font-medium text-gray-900">IPFS Document</p>
+                    <p className="text-xs text-gray-500 font-mono mt-1">{ticket.attachment}</p>
                   </div>
                 </div>
-                <p className="text-xs text-gray-500 mt-2">
-                  Note: Files will be uploaded to IPFS when smart contract is deployed
-                </p>
               </div>
             )}
           </div>
 
-          {/* Event History */}
+          {/* Ticket History */}
           <div className="bg-white rounded-lg shadow-sm border p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Ticket History</h2>
             <div className="space-y-4">
-              {ticketEvents.map((event) => (
-                <div key={event.id} className="flex gap-4 pb-4 border-b last:border-b-0">
-                  <div className="flex-shrink-0">
-                    <div className="w-8 h-8 bg-cyan-100 rounded-full flex items-center justify-center">
-                      <Clock size={16} className="text-cyan-600" />
+              {ticketEvents.length === 0 ? (
+                <p className="text-sm text-gray-500">No history events found.</p>
+              ) : (
+                ticketEvents.map((event) => (
+                  <div key={event.id} className="flex gap-4 pb-4 border-b last:border-b-0">
+                    <div className="flex-shrink-0">
+                      <div className="w-8 h-8 bg-cyan-100 rounded-full flex items-center justify-center">
+                        <Clock size={16} className="text-cyan-600" />
+                      </div>
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-medium text-gray-900">
+                          {event.eventType}
+                        </h3>
+                        <span className="text-xs text-gray-500">
+                          {formatDate(event.timestamp)}
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-600">
+                        by {formatAddress(event.actor)}
+                      </p>
+                      <div className="text-xs text-gray-400 mt-1 font-mono">
+                        Tx: {event.transactionHash.slice(0, 10)}...
+                      </div>
                     </div>
                   </div>
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-medium text-gray-900">
-                        {event.eventType}
-                      </h3>
-                      <span className="text-xs text-gray-500">
-                        {formatDate(event.timestamp)}
-                      </span>
-                    </div>
-                    <p className="text-sm text-gray-600">
-                      by {formatAddress(event.actor)}
-                    </p>
-                    <a
-                      href={`https://etherscan.io/tx/${event.transactionHash}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-blue-600 hover:underline"
-                    >
-                      Tx: {event.transactionHash.slice(0, 10)}...
-                    </a>
-                  </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
         </div>
 
         {/* Sidebar */}
         <div className="space-y-6">
-          {/* Ticket Info */}
           <div className="bg-white rounded-lg shadow-sm border p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Ticket Information</h2>
             <div className="space-y-3">
@@ -336,12 +361,12 @@ function TicketDetails() {
                 <p className="text-sm text-gray-900 font-mono">{formatAddress(ticket.creator)}</p>
               </div>
               
-              {ticket.agent && (
-                <div>
-                  <label className="text-sm font-medium text-gray-500">Assigned Agent</label>
-                  <p className="text-sm text-gray-900 font-mono">{formatAddress(ticket.agent)}</p>
-                </div>
-              )}
+              <div>
+                <label className="text-sm font-medium text-gray-500">Assigned To</label>
+                <p className="text-sm text-gray-900 font-mono">
+                  {ticket.assignedTo ? formatAddress(ticket.assignedTo) : 'Unassigned'}
+                </p>
+              </div>
               
               <div>
                 <label className="text-sm font-medium text-gray-500">Created Date</label>
@@ -355,14 +380,14 @@ function TicketDetails() {
             </div>
           </div>
 
-          {/* Blockchain Info */}
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <h3 className="text-sm font-medium text-blue-800 mb-2">Blockchain Transparency</h3>
+            <h3 className="text-sm font-medium text-blue-800 mb-2 flex items-center gap-2">
+              <Shield size={16}/> Blockchain Verified
+            </h3>
             <ul className="text-sm text-blue-700 space-y-1">
-              <li>• All changes are immutably recorded</li>
-              <li>• Full audit trail maintained</li>
-              <li>• Decentralized and transparent</li>
-              <li>• No data can be altered or deleted</li>
+              <li>• Immutable record</li>
+              <li>• Full audit trail</li>
+              <li>• Decentralized storage</li>
             </ul>
           </div>
         </div>

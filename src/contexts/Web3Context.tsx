@@ -1,6 +1,8 @@
 ﻿import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { ethers } from 'ethers';
 import { User, UserRole } from '../types';
+// @ts-ignore
+import BlockDeskArtifact from '../contracts/BlockDesk.json'; 
 
 interface Web3ContextType {
   isConnected: boolean;
@@ -9,7 +11,7 @@ interface Web3ContextType {
   connectWallet: () => Promise<void>;
   disconnectWallet: () => void;
   provider: ethers.BrowserProvider | null;
-  signer: ethers.Signer | null;
+  signer: ethers.JsonRpcSigner | null;
   contract: ethers.Contract | null;
 }
 
@@ -20,7 +22,7 @@ export function Web3Provider({ children }: { children: ReactNode }) {
   const [isConnecting, setIsConnecting] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
-  const [signer, setSigner] = useState<ethers.Signer | null>(null);
+  const [signer, setSigner] = useState<ethers.JsonRpcSigner | null>(null);
   const [contract, setContract] = useState<ethers.Contract | null>(null);
 
   const connectWallet = async () => {
@@ -31,41 +33,77 @@ export function Web3Provider({ children }: { children: ReactNode }) {
     setIsConnecting(true);
     try {
       const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      
+      // Force Network Switch to Localhost
+      const LOCAL_CHAIN_ID = '0x539'; // 1337
+      try {
+        await window.ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: LOCAL_CHAIN_ID }],
+        });
+      } catch (switchError: any) {
+        if (switchError.code === 4902) {
+          try {
+            await window.ethereum.request({
+              method: 'wallet_addEthereumChain',
+              params: [{
+                  chainId: LOCAL_CHAIN_ID,
+                  chainName: 'Localhost 8545',
+                  rpcUrls: ['http://127.0.0.1:8545'],
+                  nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
+              }],
+            });
+          } catch (addError) { console.error(addError); }
+        }
+      }
+
       if (accounts.length > 0) {
         const web3Provider = new ethers.BrowserProvider(window.ethereum);
-        const balance = await web3Provider.getBalance(accounts[0]);
-        setProvider(web3Provider);
+        const web3Signer = await web3Provider.getSigner();
+        const address = accounts[0];
+        const balance = await web3Provider.getBalance(address);
         
-        // Determine role based on wallet address (demo purposes)
-        const getUserRole = (address: string): UserRole => {
-          // Manager addresses (full admin access)
-          const managerAddresses = [
-            '0x2580fd5d3652b9fce4c7f14f30bbb77e5aeafd7d',
-            '0xaafe300907bea569970928719c88948e2b56915e',
-            // Add more manager addresses here if needed
-          ];
-          
-          // Demo mode: Check URL params for role override (for easy testing)
-          const urlParams = new URLSearchParams(window.location.search);
-          const roleParam = urlParams.get('role');
-          if (roleParam === 'user') return UserRole.USER;
-          if (roleParam === 'manager') return UserRole.MANAGER;
-          
-          // Check if address matches manager wallet
-          if (managerAddresses.includes(address.toLowerCase())) {
-            return UserRole.MANAGER;
+        const network = await web3Provider.getNetwork();
+        const chainId = network.chainId.toString();
+
+        // @ts-ignore
+        const deployedNetwork = BlockDeskArtifact.networks[chainId] || BlockDeskArtifact.networks['5777'];
+        
+        if (deployedNetwork) {
+          // *** NEW CHECK: Verify Contract Exists ***
+          const code = await web3Provider.getCode(deployedNetwork.address);
+          if (code === '0x') {
+            alert('Error: Contract not found at address. \n\nDid you restart Ganache? Run "truffle migrate --reset" to fix this.');
+            setIsConnecting(false);
+            return;
           }
+
+          const blockDeskContract = new ethers.Contract(
+            deployedNetwork.address,
+            BlockDeskArtifact.abi,
+            web3Signer
+          );
+
+          let role = UserRole.USER;
+          try {
+            const roleIdx = await blockDeskContract.userRoles(address);
+            role = Number(roleIdx) === 1 ? UserRole.MANAGER : UserRole.USER;
+          } catch (e) { console.warn(e); }
           
-          // Default to regular user
-          return UserRole.USER;
-        };
-        
-        setUser({
-          address: accounts[0],
-          role: getUserRole(accounts[0]),
-          balance: ethers.formatEther(balance)
-        });
-        setIsConnected(true);
+          setProvider(web3Provider);
+          setSigner(web3Signer);
+          setContract(blockDeskContract);
+          
+          setUser({
+            address: address,
+            role: role,
+            balance: ethers.formatEther(balance)
+          });
+          setIsConnected(true);
+        } else {
+          alert('Contract not deployed to this network. Run "truffle migrate".');
+          setIsConnecting(false);
+        }
       }
     } catch (error) {
       console.error('Connection failed:', error);
@@ -82,27 +120,21 @@ export function Web3Provider({ children }: { children: ReactNode }) {
     setContract(null);
   };
 
-  // Listen for account changes in MetaMask
   useEffect(() => {
     if (window.ethereum && isConnected) {
-      const handleAccountsChanged = async (accounts: string[]) => {
-        if (accounts.length === 0) {
-          // User disconnected their wallet
+      const handleAccountsChanged = (accounts: string[]) => {
+        if (accounts.length === 0 || (user && accounts[0].toLowerCase() !== user.address.toLowerCase())) {
           disconnectWallet();
-        } else if (accounts[0] !== user?.address) {
-          // Account switched - disconnect and require reconnection
-          disconnectWallet();
-          alert('MetaMask account changed. Please connect your wallet again.');
+          // Optional: Auto-reconnect
+          // connectWallet(); 
         }
       };
-
       window.ethereum.on('accountsChanged', handleAccountsChanged);
-
       return () => {
         window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
       };
     }
-  }, [user?.address, isConnected]);
+  }, [user, isConnected]);
 
   const value: Web3ContextType = {
     isConnected,
@@ -125,4 +157,3 @@ export function useWeb3() {
   }
   return context;
 }
-

@@ -50,7 +50,7 @@ export default function Header() {
           >
             Create Ticket
           </Link>
-          {user && (user.role === UserRole.MANAGER || user.role === UserRole.AGENT) && (
+          {user && (user.role === UserRole.MANAGER ) && (
             <Link 
               to="/admin" 
               className="hover:text-cyan-400 transition-colors"
@@ -120,7 +120,7 @@ export default function Header() {
             <span className="font-medium">Create Ticket</span>
           </Link>
 
-          {user && (user.role === UserRole.MANAGER || user.role === UserRole.AGENT) && (
+          {user && (user.role === UserRole.MANAGER ) && (
             <Link
               to="/admin"
               onClick={() => setIsOpen(false)}

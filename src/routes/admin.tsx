@@ -3,17 +3,17 @@ import { useState, useEffect } from 'react';
 import { 
   Shield, 
   Users, 
-  UserCheck, 
   Eye, 
-  CheckCircle,
-  XCircle,
-  AlertTriangle,
-  User
+  CheckCircle, 
+  AlertTriangle, 
+  User, 
+  XCircle 
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useWeb3 } from '@/contexts/Web3Context';
 import { useNotifications } from '@/contexts/NotificationContext';
 import { Ticket, TicketStatus, UserRole } from '@/types';
+import { mapStatus } from '@/lib/utils';
 
 export const Route = createFileRoute('/admin')({
   component: AdminPanel,
@@ -28,249 +28,101 @@ function AdminPanel() {
   const [inProgressTickets, setInProgressTickets] = useState<Ticket[]>([]);
   const [resolvedTickets, setResolvedTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
-  const [assigning, setAssigning] = useState<string | null>(null);
-  const [resolving, setResolving] = useState<string | null>(null);
-  const [closing, setClosing] = useState<string | null>(null);
-  const [agentAddress, setAgentAddress] = useState('');
+  const [actioningId, setActioningId] = useState<string | null>(null);
+  const [managerAddress, setManagerAddress] = useState('');
 
   useEffect(() => {
-    loadAdminData();
+    if(contract) loadAdminData();
   }, [contract]);
+
+  // Helper to prevent crashes if address is missing
+  const formatAddress = (addr?: string) => {
+    if (!addr || addr === '0x0000000000000000000000000000000000000000') return 'Unknown';
+    return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+  };
 
   const loadAdminData = async () => {
     setLoading(true);
     try {
-      // Load tickets from localStorage (using same approach as dashboard)
-      const userTickets = JSON.parse(localStorage.getItem('blockdesk-tickets') || '[]');
+      if (!contract) return;
+      const rawTickets = await contract.getAllTickets();
       
-      // Get unassigned tickets (Open status, no agent assigned yet)
-      const unassigned = userTickets.filter((ticket: any) => 
-        ticket.status === 'Open' && !ticket.agent
-      );
-      
-      // Get in-progress tickets
-      const inProgress = userTickets.filter((ticket: any) => 
-        ticket.status === 'In-Progress'
-      );
-      
-      // Get resolved tickets  
-      const resolved = userTickets.filter((ticket: any) => 
-        ticket.status === 'Resolved'
-      );
-      
-      // TODO: use real contract calls when deployed
-      // if (contract) {
-      //   const unassigned = await contract.getUnassignedTickets();
-      //   const resolved = await contract.getResolvedTickets();
-      //   setUnassignedTickets(parseTicketsFromContract(unassigned));
-      //   setResolvedTickets(parseTicketsFromContract(resolved));
-      // }
-      
-      await new Promise(resolve => setTimeout(resolve, 500));
-      setUnassignedTickets(unassigned);
-      setInProgressTickets(inProgress);
-      setResolvedTickets(resolved);
+      const allTickets: Ticket[] = rawTickets.map((t: any) => ({
+        id: t.id.toString(),
+        title: t.title,
+        status: mapStatus(Number(t.status)) as TicketStatus,
+        creator: t.creator,
+        // Handle empty address from contract
+        assignedTo: t.assignedTo === '0x0000000000000000000000000000000000000000' ? undefined : t.assignedTo,
+        createdAt: Number(t.createdAt) * 1000
+      }));
+
+      setUnassignedTickets(allTickets.filter(t => t.status === TicketStatus.OPEN));
+      setInProgressTickets(allTickets.filter(t => t.status === TicketStatus.IN_PROGRESS));
+      setResolvedTickets(allTickets.filter(t => t.status === TicketStatus.RESOLVED));
     } catch (error) {
       console.error('Error loading admin data:', error);
-      addNotification({
-        type: 'error',
-        title: 'Failed to load admin data',
-        message: 'Unable to fetch tickets'
-      });
     } finally {
       setLoading(false);
     }
   };
 
-  const assignTicket = async (ticketId: string, agentAddr: string) => {
-    if (!agentAddr) return;
-
-    setAssigning(ticketId);
+  const assignTicket = async (ticketId: string, assignee: string) => {
+    if (!assignee || !contract) return;
+    setActioningId(ticketId);
     try {
-      addNotification({
-        type: 'info',
-        title: 'Assigning Ticket...',
-        message: 'Updating ticket assignment',
-        duration: 0
-      });
-
-      // Update ticket in localStorage
-      const userTickets = JSON.parse(localStorage.getItem('blockdesk-tickets') || '[]');
-      const updatedTickets = userTickets.map((ticket: any) => {
-        if (ticket.id === ticketId) {
-          return {
-            ...ticket,
-            agent: agentAddr,
-            status: 'In-Progress'
-          };
-        }
-        return ticket;
-      });
-
-      localStorage.setItem('blockdesk-tickets', JSON.stringify(updatedTickets));
-
-      // TODO: Call smart contract when deployed
-      // const tx = await contract.assignTicket(ticketId, agentAddr);
-      // await tx.wait();
-
-      // Simulate transaction delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      addNotification({
-        type: 'success',
-        title: 'Ticket Assigned',
-        message: `Ticket #${ticketId} assigned to ${agentAddr.slice(0, 10)}...`
-      });
-
-      // Reload data
+      addNotification({ type: 'info', title: 'Confirm Assignment', message: 'Please confirm in MetaMask', duration: 0 });
+      // Added gasLimit for safety
+      const tx = await contract.assignTicket(ticketId, assignee, { gasLimit: 500000 });
+      await tx.wait();
+      addNotification({ type: 'success', title: 'Ticket Assigned', message: `Ticket #${ticketId} assigned.` });
       loadAdminData();
-      setAgentAddress('');
-
+      setManagerAddress('');
     } catch (error: any) {
-      addNotification({
-        type: 'error',
-        title: 'Assignment Failed',
-        message: error.message
-      });
+      addNotification({ type: 'error', title: 'Assignment Failed', message: error.reason || error.message });
     } finally {
-      setAssigning(null);
-    }
-  };
-
-  const closeTicket = async (ticketId: string) => {
-    setClosing(ticketId);
-    try {
-      addNotification({
-        type: 'info',
-        title: 'Closing Ticket...',
-        message: 'Updating ticket status',
-        duration: 0
-      });
-
-      // Update ticket in localStorage
-      const userTickets = JSON.parse(localStorage.getItem('blockdesk-tickets') || '[]');
-      const updatedTickets = userTickets.map((ticket: any) => {
-        if (ticket.id === ticketId) {
-          return {
-            ...ticket,
-            status: 'Closed'
-          };
-        }
-        return ticket;
-      });
-
-      localStorage.setItem('blockdesk-tickets', JSON.stringify(updatedTickets));
-
-      // TODO: Call smart contract when deployed
-      // const tx = await contract.closeTicket(ticketId);
-      // await tx.wait();
-
-      // Simulate transaction delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      addNotification({
-        type: 'success',
-        title: 'Ticket Closed',
-        message: `Ticket #${ticketId} has been closed`
-      });
-
-      // Reload data
-      loadAdminData();
-
-    } catch (error: any) {
-      addNotification({
-        type: 'error',
-        title: 'Close Failed',
-        message: error.message
-      });
-    } finally {
-      setClosing(null);
+      setActioningId(null);
     }
   };
 
   const resolveTicket = async (ticketId: string) => {
-    setResolving(ticketId);
+    if (!contract) return;
+    setActioningId(ticketId);
     try {
-      addNotification({
-        type: 'info',
-        title: 'Resolving Ticket...',
-        message: 'Marking ticket as resolved',
-        duration: 0
-      });
-
-      // Update ticket in localStorage
-      const userTickets = JSON.parse(localStorage.getItem('blockdesk-tickets') || '[]');
-      const updatedTickets = userTickets.map((ticket: any) => {
-        if (ticket.id === ticketId) {
-          return {
-            ...ticket,
-            status: 'Resolved'
-          };
-        }
-        return ticket;
-      });
-
-      localStorage.setItem('blockdesk-tickets', JSON.stringify(updatedTickets));
-
-      // TODO: Call smart contract when deployed
-      // const tx = await contract.resolveTicket(ticketId);
-      // await tx.wait();
-
-      // Simulate transaction delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      addNotification({
-        type: 'success',
-        title: 'Ticket Resolved',
-        message: `Ticket #${ticketId} has been marked as resolved`
-      });
-
-      // Reload data
+      const tx = await contract.resolveTicket(ticketId, { gasLimit: 500000 });
+      await tx.wait();
+      addNotification({ type: 'success', title: 'Ticket Resolved', message: `Ticket #${ticketId} resolved.` });
       loadAdminData();
-
     } catch (error: any) {
-      addNotification({
-        type: 'error',
-        title: 'Resolve Failed',
-        message: error.message
-      });
+      addNotification({ type: 'error', title: 'Failed', message: error.reason || error.message });
     } finally {
-      setResolving(null);
+      setActioningId(null);
     }
   };
 
-  const formatAddress = (address: string) => {
-    return `${address.slice(0, 6)}...${address.slice(-4)}`;
+  const closeTicket = async (ticketId: string) => {
+    if (!contract) return;
+    setActioningId(ticketId);
+    try {
+      const tx = await contract.closeTicket(ticketId, { gasLimit: 500000 });
+      await tx.wait();
+      addNotification({ type: 'success', title: 'Ticket Closed', message: `Ticket #${ticketId} closed.` });
+      loadAdminData();
+    } catch (error: any) {
+      addNotification({ type: 'error', title: 'Failed', message: error.reason || error.message });
+    } finally {
+      setActioningId(null);
+    }
   };
 
-  const formatDate = (timestamp: number) => {
-    return new Date(timestamp).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
-
-  // Check if user has admin privileges
   if (!user || user.role !== UserRole.MANAGER) {
     return (
       <div className="container mx-auto px-4 py-8">
-        <div className="max-w-2xl mx-auto">
-          <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-            <div className="text-red-600 mb-2">
-              <AlertTriangle size={48} className="mx-auto mb-4" />
-            </div>
-            <h2 className="text-xl font-semibold text-red-800 mb-2">
-              Access Denied
-            </h2>
-            <p className="text-red-700 mb-4">
-              You need Manager privileges to access the admin panel.
-            </p>
-            <Button onClick={() => navigate({ to: '/dashboard' })}>
-              Back to Dashboard
-            </Button>
-          </div>
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center max-w-lg mx-auto">
+          <AlertTriangle size={48} className="mx-auto mb-4 text-red-600" />
+          <h2 className="text-xl font-semibold text-red-800 mb-2">Access Denied</h2>
+          <p className="text-red-700 mb-4">You need Manager privileges to access the admin panel.</p>
+          <Button onClick={() => navigate({ to: '/dashboard' })}>Back to Dashboard</Button>
         </div>
       </div>
     );
@@ -278,248 +130,150 @@ function AdminPanel() {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      {/* Header */}
       <div className="mb-6">
-        <div className="flex items-center gap-2 mb-2">
+        <div className="flex items-center gap-3 mb-2">
           <Shield className="text-cyan-500" size={32} />
           <h1 className="text-3xl font-bold text-gray-900">Admin Panel</h1>
         </div>
-        <p className="text-gray-600">
-          Manage ticket assignments and resolve completed tickets
-        </p>
-      </div>
-
-      {/* User Info */}
-      <div className="bg-white rounded-lg shadow-sm border p-4 mb-6">
-        <div className="flex items-center gap-3">
-          <User className="text-gray-500" size={20} />
+        
+        {/* Manager Info Card */}
+        <div className="bg-white border rounded-lg p-4 shadow-sm inline-flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-cyan-100 flex items-center justify-center">
+             <User className="text-cyan-700" size={20} />
+          </div>
           <div>
-            <p className="text-sm font-medium text-gray-700">
-              Logged in as: <span className="font-mono">{formatAddress(user.address)}</span>
-            </p>
-            <p className="text-sm text-gray-500">Role: {user.role}</p>
+            <p className="text-sm font-semibold text-gray-900">Logged in as Manager</p>
+            <p className="text-xs text-gray-500 font-mono">{formatAddress(user.address)}</p>
           </div>
         </div>
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-500"></div>
-          <span className="ml-2 text-gray-600">Loading admin data...</span>
+        <div className="flex flex-col items-center justify-center py-12">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-500 mb-4"></div>
+          <p className="text-gray-500">Syncing with blockchain...</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          
           {/* Unassigned Tickets */}
           <div className="bg-white rounded-lg shadow-sm border p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <Users className="text-orange-500" size={24} />
-              <h2 className="text-xl font-semibold text-gray-900">
-                Unassigned Tickets ({unassignedTickets.length})
-              </h2>
-            </div>
-
+            <h2 className="text-xl font-semibold mb-4 flex items-center gap-2 pb-2 border-b">
+              <Users className="text-orange-500" size={20}/> 
+              Unassigned Tickets 
+              <span className="text-sm font-normal text-gray-500 ml-auto">({unassignedTickets.length})</span>
+            </h2>
+            
             {unassignedTickets.length === 0 ? (
-              <p className="text-gray-500 text-center py-8">
-                No unassigned tickets found
-              </p>
+               <div className="text-center py-8 text-gray-400 italic">No new tickets to assign</div>
             ) : (
               <div className="space-y-4">
-                {unassignedTickets.map((ticket) => (
-                  <div key={ticket.id} className="border rounded-lg p-4">
-                    <div className="flex items-start justify-between mb-2">
+                {unassignedTickets.map(t => (
+                  <div key={t.id} className="border p-4 rounded-lg bg-gray-50 hover:bg-white transition-colors">
+                    <div className="flex justify-between items-start mb-3">
                       <div>
-                        <h3 className="font-medium text-gray-900">#{ticket.id}</h3>
-                        <p className="text-sm text-gray-700 mb-1">{ticket.title}</p>
-                        <p className="text-xs text-gray-500">
-                          Created by {formatAddress(ticket.creator)} on {formatDate(ticket.createdAt)}
-                        </p>
+                        <span className="font-mono font-bold text-cyan-700 text-sm">#{t.id}</span>
+                        <h3 className="font-medium text-gray-900">{t.title}</h3>
+                        <p className="text-xs text-gray-500 mt-1">Created by: {formatAddress(t.creator)}</p>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => navigate({ to: `/ticket/${ticket.id}` as any })}
-                      >
-                        <Eye size={16} />
-                        View
+                      <Button variant="ghost" size="sm" onClick={() => navigate({ to: `/ticket/${t.id}` as any })}>
+                        <Eye size={16}/>
                       </Button>
                     </div>
-
-                    {user.role === UserRole.MANAGER && (
-                      <div className="mt-3 pt-3 border-t">
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            placeholder="Agent wallet address..."
-                            value={agentAddress}
-                            onChange={(e) => setAgentAddress(e.target.value)}
-                            className="flex-1 px-3 py-2 text-sm border rounded focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
-                            disabled={assigning === ticket.id}
-                          />
-                          <Button
-                            size="sm"
-                            onClick={() => assignTicket(ticket.id, agentAddress)}
-                            disabled={!agentAddress || assigning === ticket.id}
-                          >
-                            {assigning === ticket.id ? (
-                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                            ) : (
-                              <>
-                                <UserCheck size={16} />
-                                Assign
-                              </>
-                            )}
-                          </Button>
-                        </div>
-                      </div>
-                    )}
+                    
+                    <div className="flex gap-2">
+                      <input 
+                        type="text" 
+                        placeholder="Manager Address (0x...)" 
+                        className="border rounded px-3 py-1 text-sm flex-1" 
+                        value={managerAddress} 
+                        onChange={e => setManagerAddress(e.target.value)} 
+                      />
+                      <Button 
+                        size="sm" 
+                        disabled={actioningId === t.id || !managerAddress} 
+                        onClick={() => assignTicket(t.id, managerAddress)}
+                        className="bg-cyan-600 hover:bg-cyan-700"
+                      >
+                        {actioningId === t.id ? 'Assigning...' : 'Assign'}
+                      </Button>
+                    </div>
                   </div>
                 ))}
               </div>
             )}
           </div>
 
-          {/* In-Progress Tickets */}
-          <div className="bg-white rounded-lg shadow-sm border p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <AlertTriangle className="text-yellow-500" size={24} />
-              <h2 className="text-xl font-semibold text-gray-900">
-                In-Progress Tickets ({inProgressTickets.length})
+          {/* In Progress & Resolved */}
+          <div className="space-y-6">
+            {/* In Progress */}
+            <div className="bg-white rounded-lg shadow-sm border p-6">
+              <h2 className="text-xl font-semibold mb-4 flex items-center gap-2 pb-2 border-b">
+                <AlertTriangle className="text-yellow-500" size={20}/> 
+                In Progress
+                <span className="text-sm font-normal text-gray-500 ml-auto">({inProgressTickets.length})</span>
               </h2>
+              
+              {inProgressTickets.length === 0 ? (
+                 <div className="text-center py-8 text-gray-400 italic">No active tickets</div>
+              ) : (
+                <div className="space-y-3">
+                  {inProgressTickets.map(t => (
+                    <div key={t.id} className="border p-3 rounded-lg flex justify-between items-center bg-gray-50">
+                      <div>
+                        <div className="font-medium text-sm">#{t.id} {t.title}</div>
+                        <div className="text-xs text-gray-500">Assigned: {formatAddress(t.assignedTo)}</div>
+                      </div>
+                      <Button 
+                        size="sm" 
+                        className="bg-green-600 hover:bg-green-700 h-8" 
+                        disabled={actioningId === t.id} 
+                        onClick={() => resolveTicket(t.id)}
+                      >
+                         {actioningId === t.id ? 'Resolving...' : 'Resolve'}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {inProgressTickets.length === 0 ? (
-              <p className="text-gray-500 text-center py-8">
-                No tickets in progress
-              </p>
-            ) : (
-              <div className="space-y-4">
-                {inProgressTickets.map((ticket) => (
-                  <div key={ticket.id} className="border rounded-lg p-4">
-                    <div className="flex items-start justify-between mb-2">
-                      <div>
-                        <h3 className="font-medium text-gray-900">#{ticket.id}</h3>
-                        <p className="text-sm text-gray-700 mb-1">{ticket.title}</p>
-                        <p className="text-xs text-gray-500">
-                          Created by {formatAddress(ticket.creator)} on {formatDate(ticket.createdAt)}
-                        </p>
-                        {ticket.agent && (
-                          <p className="text-xs text-blue-600">
-                            Agent: {formatAddress(ticket.agent)}
-                          </p>
-                        )}
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => navigate({ to: `/ticket/${ticket.id}` as any })}
-                      >
-                        <Eye size={16} />
-                        View
-                      </Button>
-                    </div>
-
-                    {user.role === UserRole.MANAGER && (
-                      <div className="mt-3 pt-3 border-t">
-                        <Button
-                          variant="default"
-                          size="sm"
-                          onClick={() => resolveTicket(ticket.id)}
-                          disabled={resolving === ticket.id}
-                          className="bg-green-600 hover:bg-green-700"
-                        >
-                          {resolving === ticket.id ? (
-                            <>
-                              <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>
-                              Resolving...
-                            </>
-                          ) : (
-                            <>
-                              <CheckCircle size={16} />
-                              Mark as Resolved
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Resolved Tickets */}
-          <div className="bg-white rounded-lg shadow-sm border p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <CheckCircle className="text-green-500" size={24} />
-              <h2 className="text-xl font-semibold text-gray-900">
-                Resolved Tickets ({resolvedTickets.length})
+            {/* Resolved */}
+            <div className="bg-white rounded-lg shadow-sm border p-6">
+              <h2 className="text-xl font-semibold mb-4 flex items-center gap-2 pb-2 border-b">
+                <CheckCircle className="text-green-500" size={20}/> 
+                Resolved
+                <span className="text-sm font-normal text-gray-500 ml-auto">({resolvedTickets.length})</span>
               </h2>
-            </div>
-
-            {resolvedTickets.length === 0 ? (
-              <p className="text-gray-500 text-center py-8">
-                No resolved tickets found
-              </p>
-            ) : (
-              <div className="space-y-4">
-                {resolvedTickets.map((ticket) => (
-                  <div key={ticket.id} className="border rounded-lg p-4">
-                    <div className="flex items-start justify-between mb-2">
+              
+              {resolvedTickets.length === 0 ? (
+                 <div className="text-center py-8 text-gray-400 italic">No resolved tickets pending closure</div>
+              ) : (
+                <div className="space-y-3">
+                  {resolvedTickets.map(t => (
+                    <div key={t.id} className="border p-3 rounded-lg flex justify-between items-center bg-gray-50">
                       <div>
-                        <h3 className="font-medium text-gray-900">#{ticket.id}</h3>
-                        <p className="text-sm text-gray-700 mb-1">{ticket.title}</p>
-                        <p className="text-xs text-gray-500">
-                          Created by {formatAddress(ticket.creator)} • 
-                          Resolved by {ticket.agent ? formatAddress(ticket.agent) : 'Unknown'}
-                        </p>
+                        <div className="font-medium text-sm">#{t.id} {t.title}</div>
+                        <div className="text-xs text-gray-500">Wait for review</div>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => navigate({ to: `/ticket/${ticket.id}` as any })}
+                      <Button 
+                        size="sm" 
+                        variant="destructive" 
+                        className="h-8"
+                        disabled={actioningId === t.id} 
+                        onClick={() => closeTicket(t.id)}
                       >
-                        <Eye size={16} />
-                        View
+                        {actioningId === t.id ? 'Closing...' : 'Close'}
                       </Button>
                     </div>
-
-                    {user.role === UserRole.MANAGER && (
-                      <div className="mt-3 pt-3 border-t">
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => closeTicket(ticket.id)}
-                          disabled={closing === ticket.id}
-                        >
-                          {closing === ticket.id ? (
-                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                          ) : (
-                            <>
-                              <XCircle size={16} />
-                              Close Ticket
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
+
         </div>
       )}
-
-      {/* Info Panel */}
-      <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <h3 className="text-sm font-medium text-blue-800 mb-2">Admin Functions:</h3>
-        <ul className="text-sm text-blue-700 space-y-1">
-          <li>• <strong>Ticket Assignment:</strong> Assign open tickets to IT support agents</li>
-          <li>• <strong>Ticket Closure:</strong> Close resolved tickets to finalize them</li>
-          <li>• <strong>Blockchain Operations:</strong> All actions are recorded immutably</li>
-          <li>• <strong>Role-based Access:</strong> Only Managers and Agents can access admin functions</li>
-        </ul>
-      </div>
     </div>
   );
 }

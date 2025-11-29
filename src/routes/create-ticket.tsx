@@ -29,7 +29,8 @@ interface FormErrors {
 }
 
 function CreateTicket() {
-  const { user, isConnected } = useWeb3();
+  // Destructure 'contract' to enable blockchain interactions
+  const { user, isConnected, contract } = useWeb3();
   const { addNotification } = useNotifications();
   const navigate = useNavigate();
   const [formData, setFormData] = useState<FormData>({
@@ -89,51 +90,26 @@ function CreateTicket() {
   };
 
   const submitTicket = async (attachmentHash?: string) => {
+    if (!contract) throw new Error('Smart contract not connected.');
+
     try {
-      // For now just save to localStorage since we don't have the contract ready
-      const newTicket = {
-        id: Math.random().toString(36).substring(2, 15),
-        title: formData.title,
-        description: formData.description,
-        status: 'Open' as const,
-        creator: user?.address || 'Unknown',
-        createdAt: Date.now(),
-        ...(attachmentHash && { attachment: attachmentHash })
-      };
-
-      // Get existing tickets from localStorage
-      const existingTickets = JSON.parse(localStorage.getItem('blockdesk-tickets') || '[]');
-      
-      // Add new ticket
-      const updatedTickets = [newTicket, ...existingTickets];
-      
-      // Save back to localStorage
-      localStorage.setItem('blockdesk-tickets', JSON.stringify(updatedTickets));
-      
-      // Create a mock transaction hash for demo
-      const mockTxHash = `0x${Math.random().toString(16).substring(2, 66)}`;
-      return mockTxHash;
-      
-      /* Original blockchain code - uncomment this when contract is deployed:
-      if (!contract) {
-        throw new Error('Smart contract not connected');
-      }
-
-      // Call smart contract function
       const tx = await contract.createTicket(
         formData.title,
         formData.description,
-        attachmentHash || ''
+        attachmentHash || '',
+        { gasLimit: 500000 }
       );
 
-      // Wait for transaction confirmation
-      await tx.wait();
+      // Wait for receipt to ensure block is mined
+      const receipt = await tx.wait();
+      
+      // Optional: Log the receipt to see the new Ticket ID
+      console.log("Transaction Receipt:", receipt);
       
       return tx.hash;
-      */
     } catch (error: any) {
       console.error('Error submitting ticket:', error);
-      throw new Error(error.message || 'Failed to submit ticket');
+      throw new Error(error.reason || error.message || 'Failed to submit ticket');
     }
   };
 
@@ -282,9 +258,12 @@ function CreateTicket() {
                   {errors.title}
                 </p>
               )}
-              <p className="mt-1 text-xs text-gray-500">
-                {formData.title.length}/100 characters
-              </p>
+              {/* Character Counter - Right Aligned */}
+              <div className="flex justify-end">
+                <p className="mt-1 text-xs text-gray-500">
+                  {formData.title.length}/100 characters
+                </p>
+              </div>
             </div>
 
             {/* Description */}
@@ -310,9 +289,12 @@ function CreateTicket() {
                   {errors.description}
                 </p>
               )}
-              <p className="mt-1 text-xs text-gray-500">
-                {formData.description.length}/1000 characters
-              </p>
+              {/* Character Counter - Right Aligned */}
+              <div className="flex justify-end">
+                <p className="mt-1 text-xs text-gray-500">
+                  {formData.description.length}/1000 characters
+                </p>
+              </div>
             </div>
 
             {/* File Attachment */}
