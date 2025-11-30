@@ -10,13 +10,17 @@ import {
   XCircle,
   User as UserIcon,
   Play,
-  Shield
+  Shield,
+  MessageSquare,
+  Send,
+  Users
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useWeb3 } from '@/contexts/Web3Context';
 import { useNotifications } from '@/contexts/NotificationContext';
-import { Ticket, TicketStatus, UserRole, TicketEvent } from '@/types';
+import { Ticket, TicketStatus, UserRole, TicketEvent, Comment } from '@/types';
 import { mapStatus } from '@/lib/utils';
+import { getIPFSUrl, isIPFSHash, uploadTextToIPFS } from '@/lib/ipfs';
 
 export const Route = createFileRoute('/ticket/$ticketId')({
   component: TicketDetails,
@@ -28,39 +32,74 @@ function TicketDetails() {
   const { addNotification } = useNotifications();
   const navigate = useNavigate();
   
+  // Component state - stores ticket data and UI state
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [ticketEvents, setTicketEvents] = useState<TicketEvent[]>([]);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [newComment, setNewComment] = useState('');
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
+  const [submittingComment, setSubmittingComment] = useState(false);
+  const [descriptionFromIPFS, setDescriptionFromIPFS] = useState(false);
+  const [showReassignDialog, setShowReassignDialog] = useState(false);
+  const [reassignAddress, setReassignAddress] = useState('');
 
+  // Load ticket data when component mounts or ticketId/contract changes
   useEffect(() => {
     if (contract && ticketId) {
       loadTicketDetails();
       loadTicketHistory();
+      loadComments();
     }
   }, [ticketId, contract]);
 
+  // Fetch ticket details from blockchain and IPFS
+  // Fetch ticket details from blockchain and IPFS
   const loadTicketDetails = async () => {
     setLoading(true);
     try {
       if (!contract) return;
       
+      // Get ticket data from smart contract
       const rawTicket = await contract.getTicket(ticketId);
       
       if (rawTicket.id.toString() === "0") {
         throw new Error('Ticket not found');
       }
 
+      // Description is stored as IPFS hash, retrieve the actual text from localStorage
+      let descriptionText = rawTicket.description;
+      let isFromIPFS = false;
+      
+      // Check if description is an IPFS hash (starts with Qm)
+      if (rawTicket.description.startsWith('Qm')) {
+        const storedDescription = localStorage.getItem(`ipfs_${rawTicket.description}`);
+        if (storedDescription) {
+          descriptionText = storedDescription;
+          isFromIPFS = true;
+        }
+      }
+
+      // Format the ticket data for display
       const formattedTicket: Ticket = {
         id: rawTicket.id.toString(),
         title: rawTicket.title,
-        description: rawTicket.description,
+        description: descriptionText,
         status: mapStatus(Number(rawTicket.status)) as TicketStatus,
         creator: rawTicket.creator,
         assignedTo: rawTicket.assignedTo === '0x0000000000000000000000000000000000000000' ? undefined : rawTicket.assignedTo,
         attachment: rawTicket.attachmentHash,
         createdAt: Number(rawTicket.createdAt) * 1000,
       };
+      
+      setDescriptionFromIPFS(isFromIPFS);
+      
+      if (isFromIPFS) {
+        console.log('✓ Description loaded from IPFS');
+      }
+      if (formattedTicket.attachment) {
+        console.log('✓ Attachment stored in IPFS');
+      }
       
       setTicket(formattedTicket);
     } catch (error) {
@@ -70,14 +109,16 @@ function TicketDetails() {
     }
   };
 
+  // Fetch ticket history (all events) from blockchain event logs
   const loadTicketHistory = async () => {
     if (!contract) return;
     try {
-      // Fetch events for this ticket ID
+      // Set up filters to query events for this specific ticket
       const filterCreated = contract.filters.TicketCreated(ticketId);
       const filterStatus = contract.filters.StatusUpdated(ticketId);
       const filterAssigned = contract.filters.TicketAssigned(ticketId);
 
+      // Query all event types in parallel for efficiency
       const [createdLogs, statusLogs, assignedLogs] = await Promise.all([
         contract.queryFilter(filterCreated),
         contract.queryFilter(filterStatus),
@@ -86,7 +127,7 @@ function TicketDetails() {
 
       const events: TicketEvent[] = [];
 
-      // Process Created Events
+      // Process ticket creation events
       for (const log of createdLogs) {
         const block = await log.getBlock();
         events.push({
@@ -99,7 +140,7 @@ function TicketDetails() {
         });
       }
 
-      // Process Status Updates
+      // Process status change events (Open → In Progress → Resolved → Closed)
       for (const log of statusLogs) {
         const block = await log.getBlock();
         const statusIdx = Number((log as any).args[1]);
@@ -113,28 +154,92 @@ function TicketDetails() {
         });
       }
 
-      // Process Assignments
+      // Process ticket assignment/reassignment events
       for (const log of assignedLogs) {
         const block = await log.getBlock();
         events.push({
           id: log.transactionHash,
           ticketId,
           eventType: 'Ticket Assigned',
-          actor: (log as any).args[2],
+          actor: (log as any).args[2], // Who performed the assignment
           timestamp: block.timestamp * 1000,
           transactionHash: log.transactionHash,
-          data: { assignee: (log as any).args[1] }
+          data: { assignee: (log as any).args[1] } // Who the ticket was assigned to
         });
       }
 
+      // Sort events by timestamp (newest first) and update state
       setTicketEvents(events.sort((a, b) => b.timestamp - a.timestamp));
     } catch (e) {
       console.warn("Could not fetch history:", e);
     }
   };
 
-  // Combined "Start Work" Action
-  // Assigns to self AND sets status to In Progress
+  // Fetch all comments for this ticket from blockchain and IPFS
+  const loadComments = async () => {
+    if (!contract) return;
+    try {
+      // Get comment data from smart contract
+      const rawComments = await contract.getTicketComments(ticketId);
+      const formattedComments: Comment[] = rawComments.map((c: any) => {
+        let commentText = c.content;
+        
+        // Comment content is stored as IPFS hash, retrieve actual text from localStorage
+        if (c.content.startsWith('Qm')) {
+          const stored = localStorage.getItem(`ipfs_${c.content}`);
+          if (stored) {
+            commentText = stored;
+          }
+        }
+        
+        return {
+          id: c.id.toString(),
+          ticketId: c.ticketId.toString(),
+          author: c.author,
+          content: commentText,
+          createdAt: Number(c.createdAt) * 1000
+        };
+      });
+      setComments(formattedComments);
+      
+      // Log how many comments were loaded from IPFS
+      const ipfsCount = formattedComments.filter(c => rawComments.find((rc: any) => rc.id.toString() === c.id)?.content.startsWith('Qm')).length;
+      if (ipfsCount > 0) {
+        console.log(`✓ ${ipfsCount} comment(s) loaded from IPFS`);
+      }
+    } catch (e) {
+      console.warn("Could not fetch comments:", e);
+    }
+  };
+
+  // Submit a new comment - uploads to IPFS then stores hash on blockchain
+  const handleAddComment = async () => {
+    if (!contract || !newComment.trim()) return;
+    setSubmittingComment(true);
+    try {
+      // First, upload comment text to IPFS and get hash
+      const commentResult = await uploadTextToIPFS(newComment);
+      const commentHash = commentResult.hash;
+      
+      // Store actual comment text in localStorage (keyed by IPFS hash)
+      localStorage.setItem(`ipfs_${commentHash}`, newComment);
+      console.log('✓ Comment uploaded to IPFS');
+      
+      // Store only the IPFS hash on blockchain (saves gas)
+      const tx = await contract.addComment(ticketId, commentHash, { gasLimit: 500000 });
+      await tx.wait();
+      addNotification({ type: 'success', title: 'Comment Added', message: 'Your comment has been posted' });
+      setNewComment('');
+      loadComments(); // Refresh comment list
+    } catch (error: any) {
+      console.error(error);
+      addNotification({ type: 'error', title: 'Error', message: error.reason || error.message });
+    } finally {
+      setSubmittingComment(false);
+    }
+  };
+
+  // User clicks "Start Work" - assigns ticket to themselves and marks as In Progress
   const handleStartWork = async () => {
     if (!contract || !user) return;
     setUpdating(true);
@@ -155,6 +260,7 @@ function TicketDetails() {
     }
   };
 
+  // Update ticket status - calls different contract functions depending on status
   const handleUpdateStatus = async (newStatus: TicketStatus) => {
     if (!contract) return;
     setUpdating(true);
@@ -162,21 +268,39 @@ function TicketDetails() {
       let tx;
       const options = { gasLimit: 500000 };
 
+      // Use specific contract functions for resolved and closed statuses
       if (newStatus === TicketStatus.RESOLVED) {
         tx = await contract.resolveTicket(ticketId, options);
       } else if (newStatus === TicketStatus.CLOSED) {
         tx = await contract.closeTicket(ticketId, options);
       } else {
-        // Fallback for other status updates if needed
+        // For other statuses (OPEN, IN_PROGRESS), use updateStatus with index
         let statusIdx = 0;
         if(newStatus === TicketStatus.IN_PROGRESS) statusIdx = 1;
-        if(newStatus === TicketStatus.RESOLVED) statusIdx = 2;
-        if(newStatus === TicketStatus.CLOSED) statusIdx = 3;
         tx = await contract.updateStatus(ticketId, statusIdx, options);
       }
       
       await tx.wait();
       addNotification({ type: 'success', title: 'Updated', message: `Status changed to ${newStatus}` });
+      loadTicketDetails();
+      loadTicketHistory();
+    } catch (error: any) {
+      console.error(error);
+      addNotification({ type: 'error', title: 'Error', message: error.reason || error.message });
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleReassign = async () => {
+    if (!contract || !reassignAddress.trim()) return;
+    setUpdating(true);
+    try {
+      const tx = await contract.assignTicket(ticketId, reassignAddress, { gasLimit: 500000 });
+      await tx.wait();
+      addNotification({ type: 'success', title: 'Ticket Reassigned', message: 'Ticket has been reassigned successfully' });
+      setShowReassignDialog(false);
+      setReassignAddress('');
       loadTicketDetails();
       loadTicketHistory();
     } catch (error: any) {
@@ -274,14 +398,21 @@ function TicketDetails() {
               </Button>
             )}
 
-            {/* Button 2: Resolve (If In Progress and Assigned to Me or Manager) */}
+            {/* Button 2: Reassign (If ticket is assigned and user is Manager) */}
+            {ticket.assignedTo && isManager && ticket.status !== TicketStatus.CLOSED && (
+              <Button onClick={() => setShowReassignDialog(true)} disabled={updating} variant="outline" className="border-cyan-600 text-cyan-600 hover:bg-cyan-50">
+                <Users size={16} className="mr-2" /> Reassign
+              </Button>
+            )}
+
+            {/* Button 3: Resolve (If In Progress and Assigned to Me or Manager) */}
             {ticket.status === TicketStatus.IN_PROGRESS && (isAssignedToMe || isManager) && (
               <Button onClick={() => handleUpdateStatus(TicketStatus.RESOLVED)} disabled={updating} className="bg-green-600 hover:bg-green-700">
                 <CheckCircle size={16} className="mr-2" /> Resolve Ticket
               </Button>
             )}
 
-            {/* Button 3: Close (If Resolved and Manager) */}
+            {/* Button 4: Close (If Resolved and Manager) */}
             {ticket.status === TicketStatus.RESOLVED && isManager && (
               <Button onClick={() => handleUpdateStatus(TicketStatus.CLOSED)} disabled={updating} variant="destructive">
                 <XCircle size={16} className="mr-2" /> Close Ticket
@@ -295,23 +426,128 @@ function TicketDetails() {
         {/* Main Content */}
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-white rounded-lg shadow-sm border p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Description</h2>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              Description
+              {descriptionFromIPFS && (
+                <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded font-normal">IPFS</span>
+              )}
+            </h2>
             <p className="text-gray-700 whitespace-pre-wrap leading-relaxed">
               {ticket.description}
             </p>
             
             {ticket.attachment && (
               <div className="mt-4 pt-4 border-t">
-                <h3 className="text-sm font-medium text-gray-700 mb-2">Attachment</h3>
-                <div className="flex items-center gap-2 p-3 bg-gray-50 rounded border">
-                  <Paperclip size={16} className="text-gray-500" />
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-gray-900">IPFS Document</p>
-                    <p className="text-xs text-gray-500 font-mono mt-1">{ticket.attachment}</p>
+                <h3 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
+                  Attachment
+                  <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded font-normal">IPFS</span>
+                </h3>
+                {isIPFSHash(ticket.attachment) ? (
+                  <div className="space-y-3">
+                    {/* IPFS File Preview */}
+                    <div className="flex items-center gap-2 p-3 bg-gray-50 rounded border">
+                      <Paperclip size={16} className="text-gray-500 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900">Attachment</p>
+                        <p className="text-xs text-gray-500 font-mono mt-1 truncate">{ticket.attachment}</p>
+                      </div>
+                    </div>
+                    
+                    {/* Image Preview (if it's an image) */}
+                    <div className="border rounded-lg overflow-hidden bg-gray-50">
+                      <div className="p-4">
+                        <p className="text-xs text-gray-500 mb-2">Attachment:</p>
+                        <img 
+                          src={getIPFSUrl(ticket.attachment)} 
+                          alt="Ticket attachment" 
+                          className="max-w-full h-auto rounded"
+                          onLoad={() => {
+                            console.log('Image loaded successfully!');
+                          }}
+                          onError={(e) => {
+                            console.error('Image failed to load');
+                            // Hide image if it fails to load (not an image)
+                            e.currentTarget.style.display = 'none';
+                          }}
+                        />
+                      </div>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="flex items-center gap-2 p-3 bg-gray-50 rounded border">
+                    <Paperclip size={16} className="text-gray-500" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-gray-900">Attachment</p>
+                      <p className="text-xs text-gray-500 mt-1">{ticket.attachment}</p>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
+          </div>
+
+          {/* Comments Section */}
+          <div className="bg-white rounded-lg shadow-sm border p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <MessageSquare size={20} className="text-cyan-500" />
+              Comments ({comments.length})
+            </h2>
+            
+            {/* Add Comment Form */}
+            <div className="mb-6 pb-6 border-b">
+              <textarea
+                value={newComment}
+                onChange={(e) => setNewComment(e.target.value)}
+                placeholder="Add a comment..."
+                className="w-full border rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 resize-none"
+                rows={3}
+                disabled={submittingComment}
+              />
+              <div className="flex justify-end mt-2">
+                <Button 
+                  onClick={handleAddComment} 
+                  disabled={!newComment.trim() || submittingComment}
+                  className="bg-cyan-600 hover:bg-cyan-700"
+                  size="sm"
+                >
+                  {submittingComment ? 'Posting...' : (
+                    <>
+                      <Send size={14} className="mr-2" /> Post Comment
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            {/* Comments List */}
+            <div className="space-y-4">
+              {comments.length === 0 ? (
+                <p className="text-sm text-gray-500 text-center py-4">No comments yet. Be the first to comment!</p>
+              ) : (
+                comments.map((comment) => (
+                  <div key={comment.id} className="flex gap-3 p-4 bg-gray-50 rounded-lg">
+                    <div className="flex-shrink-0">
+                      <div className="w-10 h-10 bg-cyan-100 rounded-full flex items-center justify-center">
+                        <UserIcon size={20} className="text-cyan-600" />
+                      </div>
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-gray-900 font-mono">
+                          {formatAddress(comment.author)}
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {formatDate(comment.createdAt)}
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-700 whitespace-pre-wrap">
+                        {comment.content}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
 
           {/* Ticket History */}
@@ -339,6 +575,9 @@ function TicketDetails() {
                       </div>
                       <p className="text-sm text-gray-600">
                         by {formatAddress(event.actor)}
+                        {event.data?.assignee && (
+                          <span className="text-gray-500"> → assigned to <span className="font-mono">{formatAddress(event.data.assignee)}</span></span>
+                        )}
                       </p>
                       <div className="text-xs text-gray-400 mt-1 font-mono">
                         Tx: {event.transactionHash.slice(0, 10)}...
@@ -392,6 +631,47 @@ function TicketDetails() {
           </div>
         </div>
       </div>
+
+      {/* Reassign Dialog */}
+      {showReassignDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <Users size={20} className="text-cyan-600" />
+              Reassign Ticket
+            </h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Enter the wallet address of the manager you want to assign this ticket to.
+            </p>
+            <input
+              type="text"
+              value={reassignAddress}
+              onChange={(e) => setReassignAddress(e.target.value)}
+              placeholder="0x..."
+              className="w-full border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-cyan-500 mb-4"
+            />
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowReassignDialog(false);
+                  setReassignAddress('');
+                }}
+                disabled={updating}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleReassign}
+                disabled={!reassignAddress.trim() || updating}
+                className="bg-cyan-600 hover:bg-cyan-700"
+              >
+                {updating ? 'Reassigning...' : 'Reassign'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

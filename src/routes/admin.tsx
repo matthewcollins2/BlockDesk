@@ -27,9 +27,11 @@ function AdminPanel() {
   const [unassignedTickets, setUnassignedTickets] = useState<Ticket[]>([]);
   const [inProgressTickets, setInProgressTickets] = useState<Ticket[]>([]);
   const [resolvedTickets, setResolvedTickets] = useState<Ticket[]>([]);
+  const [closedTickets, setClosedTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
   const [actioningId, setActioningId] = useState<string | null>(null);
   const [managerAddress, setManagerAddress] = useState('');
+  const [reassignAddresses, setReassignAddresses] = useState<{[key: string]: string}>({});
 
   useEffect(() => {
     if(contract) loadAdminData();
@@ -60,6 +62,7 @@ function AdminPanel() {
       setUnassignedTickets(allTickets.filter(t => t.status === TicketStatus.OPEN));
       setInProgressTickets(allTickets.filter(t => t.status === TicketStatus.IN_PROGRESS));
       setResolvedTickets(allTickets.filter(t => t.status === TicketStatus.RESOLVED));
+      setClosedTickets(allTickets.filter(t => t.status === TicketStatus.CLOSED));
     } catch (error) {
       console.error('Error loading admin data:', error);
     } finally {
@@ -107,6 +110,21 @@ function AdminPanel() {
       const tx = await contract.closeTicket(ticketId, { gasLimit: 500000 });
       await tx.wait();
       addNotification({ type: 'success', title: 'Ticket Closed', message: `Ticket #${ticketId} closed.` });
+      loadAdminData();
+    } catch (error: any) {
+      addNotification({ type: 'error', title: 'Failed', message: error.reason || error.message });
+    } finally {
+      setActioningId(null);
+    }
+  };
+
+  const reopenTicket = async (ticketId: string) => {
+    if (!contract) return;
+    setActioningId(ticketId);
+    try {
+      const tx = await contract.reopenTicket(ticketId, { gasLimit: 500000 });
+      await tx.wait();
+      addNotification({ type: 'success', title: 'Ticket Reopened', message: `Ticket #${ticketId} reopened.` });
       loadAdminData();
     } catch (error: any) {
       addNotification({ type: 'error', title: 'Failed', message: error.reason || error.message });
@@ -219,19 +237,41 @@ function AdminPanel() {
               ) : (
                 <div className="space-y-3">
                   {inProgressTickets.map(t => (
-                    <div key={t.id} className="border p-3 rounded-lg flex justify-between items-center bg-gray-50">
-                      <div>
-                        <div className="font-medium text-sm">#{t.id} {t.title}</div>
-                        <div className="text-xs text-gray-500">Assigned: {formatAddress(t.assignedTo)}</div>
+                    <div key={t.id} className="border p-3 rounded-lg bg-gray-50">
+                      <div className="flex justify-between items-start mb-2">
+                        <div>
+                          <div className="font-medium text-sm">#{t.id} {t.title}</div>
+                          <div className="text-xs text-gray-500">Assigned: {formatAddress(t.assignedTo)}</div>
+                        </div>
+                        <Button 
+                          size="sm" 
+                          className="bg-green-600 hover:bg-green-700 h-8" 
+                          disabled={actioningId === t.id} 
+                          onClick={() => resolveTicket(t.id)}
+                        >
+                           {actioningId === t.id ? 'Resolving...' : 'Resolve'}
+                        </Button>
                       </div>
-                      <Button 
-                        size="sm" 
-                        className="bg-green-600 hover:bg-green-700 h-8" 
-                        disabled={actioningId === t.id} 
-                        onClick={() => resolveTicket(t.id)}
-                      >
-                         {actioningId === t.id ? 'Resolving...' : 'Resolve'}
-                      </Button>
+                      
+                      {/* Reassign section */}
+                      <div className="flex gap-2 mt-2 pt-2 border-t">
+                        <input 
+                          type="text" 
+                          placeholder="New Manager Address (0x...)" 
+                          className="border rounded px-2 py-1 text-xs flex-1" 
+                          value={reassignAddresses[t.id] || ''} 
+                          onChange={e => setReassignAddresses({...reassignAddresses, [t.id]: e.target.value})} 
+                        />
+                        <Button 
+                          size="sm" 
+                          variant="outline"
+                          className="h-7 text-xs border-cyan-600 text-cyan-600 hover:bg-cyan-50"
+                          disabled={actioningId === t.id || !reassignAddresses[t.id]} 
+                          onClick={() => assignTicket(t.id, reassignAddresses[t.id])}
+                        >
+                          {actioningId === t.id ? 'Reassigning...' : 'Reassign'}
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -264,6 +304,38 @@ function AdminPanel() {
                         onClick={() => closeTicket(t.id)}
                       >
                         {actioningId === t.id ? 'Closing...' : 'Close'}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Closed Tickets */}
+            <div className="bg-white rounded-lg shadow-sm border p-6">
+              <h2 className="text-xl font-semibold mb-4 flex items-center gap-2 pb-2 border-b">
+                <XCircle className="text-gray-500" size={20}/> 
+                Closed Tickets
+                <span className="text-sm font-normal text-gray-500 ml-auto">({closedTickets.length})</span>
+              </h2>
+              
+              {closedTickets.length === 0 ? (
+                 <div className="text-center py-8 text-gray-400 italic">No closed tickets</div>
+              ) : (
+                <div className="space-y-3">
+                  {closedTickets.map(t => (
+                    <div key={t.id} className="border p-3 rounded-lg flex justify-between items-center bg-gray-50">
+                      <div>
+                        <div className="font-medium text-sm">#{t.id} {t.title}</div>
+                        <div className="text-xs text-gray-500">Closed on {new Date(t.createdAt).toLocaleDateString()}</div>
+                      </div>
+                      <Button 
+                        size="sm" 
+                        className="bg-blue-600 hover:bg-blue-700 h-8"
+                        disabled={actioningId === t.id} 
+                        onClick={() => reopenTicket(t.id)}
+                      >
+                        {actioningId === t.id ? 'Reopening...' : 'Reopen'}
                       </Button>
                     </div>
                   ))}

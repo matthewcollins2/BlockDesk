@@ -17,13 +17,25 @@ contract BlockDesk {
         uint256 updatedAt;
     }
     
+    struct Comment {
+        uint256 id;
+        uint256 ticketId;
+        address author;
+        string content;
+        uint256 createdAt;
+    }
+    
     mapping(uint256 => Ticket) public tickets;
     mapping(address => UserRole) public userRoles;
+    mapping(uint256 => Comment[]) public ticketComments; // ticketId => array of comments
     uint256 public nextTicketId = 1;
+    uint256 public nextCommentId = 1;
     
     event TicketCreated(uint256 indexed ticketId, address indexed creator, string title);
     event StatusUpdated(uint256 indexed ticketId, TicketStatus status, address indexed updater);
     event TicketAssigned(uint256 indexed ticketId, address indexed assignee, address indexed assigner);
+    event TicketReopened(uint256 indexed ticketId, address indexed reopener);
+    event CommentAdded(uint256 indexed ticketId, uint256 indexed commentId, address indexed author);
     
     constructor() {
         userRoles[msg.sender] = UserRole.Manager; // Contract deployer is manager
@@ -98,6 +110,45 @@ contract BlockDesk {
         tickets[ticketId].status = TicketStatus.Closed;
         tickets[ticketId].updatedAt = block.timestamp;
         emit StatusUpdated(ticketId, TicketStatus.Closed, msg.sender);
+    }
+    
+    // New: Reopen a closed or resolved ticket
+    function reopenTicket(uint256 ticketId) external onlyManager {
+        require(tickets[ticketId].id != 0, "Ticket does not exist");
+        require(
+            tickets[ticketId].status == TicketStatus.Closed || 
+            tickets[ticketId].status == TicketStatus.Resolved,
+            "Only closed or resolved tickets can be reopened"
+        );
+        
+        tickets[ticketId].status = TicketStatus.Open;
+        tickets[ticketId].assignedTo = address(0); // Clear assignment
+        tickets[ticketId].updatedAt = block.timestamp;
+        emit TicketReopened(ticketId, msg.sender);
+    }
+    
+    // New: Add a comment to a ticket
+    function addComment(uint256 ticketId, string memory content) external {
+        require(tickets[ticketId].id != 0, "Ticket does not exist");
+        require(bytes(content).length > 0, "Comment cannot be empty");
+        
+        uint256 commentId = nextCommentId++;
+        Comment memory newComment = Comment({
+            id: commentId,
+            ticketId: ticketId,
+            author: msg.sender,
+            content: content,
+            createdAt: block.timestamp
+        });
+        
+        ticketComments[ticketId].push(newComment);
+        emit CommentAdded(ticketId, commentId, msg.sender);
+    }
+    
+    // Get all comments for a ticket
+    function getTicketComments(uint256 ticketId) external view returns (Comment[] memory) {
+        require(tickets[ticketId].id != 0, "Ticket does not exist");
+        return ticketComments[ticketId];
     }
     
     function setUserRole(address user, UserRole role) external onlyManager {

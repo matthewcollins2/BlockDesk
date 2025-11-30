@@ -59,7 +59,6 @@ function Dashboard() {
     let filtered = [...tickets];
     if (filter === 'my' && user) {
       filtered = filtered.filter(ticket => 
-        ticket.creator.toLowerCase() === user.address.toLowerCase() || 
         ticket.assignedTo?.toLowerCase() === user.address.toLowerCase()
       );
     } else if (filter === 'open') {

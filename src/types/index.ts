@@ -10,6 +10,14 @@ export interface Ticket {
   attachment?: string; // IPFS hash
 }
 
+export interface Comment {
+  id: string;
+  ticketId: string;
+  author: string;
+  content: string;
+  createdAt: number;
+}
+
 export enum TicketStatus {
   OPEN = "Open",
   IN_PROGRESS = "In-Progress", 

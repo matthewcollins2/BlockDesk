@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { useWeb3 } from '@/contexts/Web3Context';
 import { useNotifications } from '@/contexts/NotificationContext';
+import { uploadToIPFS, uploadTextToIPFS } from '@/lib/ipfs';
 
 export const Route = createFileRoute('/create-ticket')({
   component: CreateTicket,
@@ -71,31 +72,27 @@ function CreateTicket() {
     return Object.keys(newErrors).length === 0;
   };
 
-  const uploadToIPFS = async (file: File): Promise<string> => {
-    // Mock IPFS upload - need to use actual service later like Web3.Storage
+  const handleIPFSUpload = async (file: File) => {
     setUploadingToIPFS(true);
     
     try {
-      // Simulate upload delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Create a fake hash based on file name for now
-      const mockHash = `QmX${Math.random().toString(36).substring(2, 15)}${file.name.replace(/[^a-zA-Z0-9]/g, '').substring(0, 10)}`;
-      return mockHash;
+      const result = await uploadToIPFS(file);
+      return result;
     } catch (error) {
+      console.error('IPFS upload error:', error);
       throw new Error('Failed to upload file to IPFS');
     } finally {
       setUploadingToIPFS(false);
     }
   };
 
-  const submitTicket = async (attachmentHash?: string) => {
+  const submitTicket = async (descriptionHash: string, attachmentHash?: string) => {
     if (!contract) throw new Error('Smart contract not connected.');
 
     try {
       const tx = await contract.createTicket(
         formData.title,
-        formData.description,
+        descriptionHash, // Store IPFS hash instead of description text
         attachmentHash || '',
         { gasLimit: 500000 }
       );
@@ -141,19 +138,40 @@ function CreateTicket() {
     
     try {
       let attachmentHash: string | undefined;
+      let descriptionHash: string;
+
+      // Upload description to IPFS
+      addNotification({
+        type: 'info',
+        title: 'Processing description...',
+        message: 'Uploading to IPFS'
+      });
+      
+      const descriptionResult = await uploadTextToIPFS(formData.description);
+      descriptionHash = descriptionResult.hash;
+      
+      // Store description in localStorage
+      localStorage.setItem(`ipfs_${descriptionHash}`, formData.description);
+      console.log('✓ Description uploaded to IPFS');
 
       // Upload attachment to IPFS if present
       if (formData.attachment) {
         addNotification({
           type: 'info',
-          title: 'Uploading to IPFS...',
-          message: 'Your file is being uploaded to decentralized storage'
+          title: 'Processing file...',
+          message: 'Your file is being prepared'
         });
-        attachmentHash = await uploadToIPFS(formData.attachment);
+        const result = await handleIPFSUpload(formData.attachment);
+        attachmentHash = result.hash;
+        
+        if (result.dataUrl) {
+          localStorage.setItem(`ipfs_${result.hash}`, result.dataUrl);
+          console.log('✓ Attachment uploaded to IPFS');
+        }
       }
 
       // Submit ticket to blockchain
-      const txHash = await submitTicket(attachmentHash);
+      const txHash = await submitTicket(descriptionHash, attachmentHash);
 
       // Success! Show notification and redirect
       addNotification({
