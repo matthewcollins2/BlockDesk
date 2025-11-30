@@ -3,11 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "cd BlockDesk && dev --port 3000",
+    "dev": "dev --port 3000",
     "build": "vite build",
     "serve": "vite preview",
     "test": "vitest run",
-    "truffle": "cd blockchain && truffle compile && truffle migrate --reset"
+    "truffle": "cd blockchain && truffle compile && truffle migrate --reset && cd ..",
+    "migrate": "cd blockchain && truffle migrate --reset && cd .."
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.2.4",
