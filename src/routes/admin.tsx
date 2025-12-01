@@ -7,7 +7,8 @@ import {
   CheckCircle, 
   AlertTriangle, 
   User, 
-  XCircle 
+  XCircle,
+  RotateCcw
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useWeb3 } from '@/contexts/Web3Context';
@@ -75,7 +76,7 @@ function AdminPanel() {
     setActioningId(ticketId);
     try {
       addNotification({ type: 'info', title: 'Confirm Assignment', message: 'Please confirm in MetaMask', duration: 0 });
-      const tx = await contract.assignTicket(ticketId, assignee);
+      const tx = await contract.assignTicket(ticketId, assignee, { gasLimit: 50000 });
       await tx.wait();
       addNotification({ type: 'success', title: 'Ticket Assigned', message: `Ticket #${ticketId} assigned.` });
       loadAdminData();
@@ -91,7 +92,7 @@ function AdminPanel() {
     if (!contract) return;
     setActioningId(ticketId);
     try {
-      const tx = await contract.resolveTicket(ticketId);
+      const tx = await contract.resolveTicket(ticketId, { gasLimit: 50000 });
       await tx.wait();
       addNotification({ type: 'success', title: 'Ticket Resolved', message: `Ticket #${ticketId} resolved.` });
       loadAdminData();
@@ -106,7 +107,7 @@ function AdminPanel() {
     if (!contract) return;
     setActioningId(ticketId);
     try {
-      const tx = await contract.closeTicket(ticketId);
+      const tx = await contract.closeTicket(ticketId, { gasLimit: 50000 });
       await tx.wait();
       addNotification({ type: 'success', title: 'Ticket Closed', message: `Ticket #${ticketId} closed.` });
       loadAdminData();
@@ -121,7 +122,7 @@ function AdminPanel() {
     if (!contract) return;
     setActioningId(ticketId);
     try {
-      const tx = await contract.reopenTicket(ticketId);
+      const tx = await contract.reopenTicket(ticketId, { gasLimit: 50000 });
       await tx.wait();
       addNotification({ type: 'success', title: 'Ticket Reopened', message: `Ticket #${ticketId} reopened.` });
       loadAdminData();
@@ -295,15 +296,26 @@ function AdminPanel() {
                         <div className="font-medium text-sm">#{t.id} {t.title}</div>
                         <div className="text-xs text-gray-500">Wait for review</div>
                       </div>
-                      <Button 
-                        size="sm" 
-                        variant="destructive" 
-                        className="h-8"
-                        disabled={actioningId === t.id} 
-                        onClick={() => closeTicket(t.id)}
-                      >
-                        {actioningId === t.id ? 'Closing...' : 'Close'}
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button 
+                          size="sm" 
+                          className="h-8 bg-blue-600 hover:bg-blue-700"
+                          disabled={actioningId === t.id} 
+                          onClick={() => reopenTicket(t.id)}
+                        >
+                          <RotateCcw size={14} className="mr-1" />
+                          {actioningId === t.id ? 'Reopening...' : 'Reopen'}
+                        </Button>
+                        <Button 
+                          size="sm" 
+                          variant="destructive" 
+                          className="h-8"
+                          disabled={actioningId === t.id} 
+                          onClick={() => closeTicket(t.id)}
+                        >
+                          {actioningId === t.id ? 'Closing...' : 'Close'}
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>

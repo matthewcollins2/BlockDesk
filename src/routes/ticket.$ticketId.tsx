@@ -13,7 +13,8 @@ import {
   Shield,
   MessageSquare,
   Send,
-  Users
+  Users,
+  RotateCcw
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useWeb3 } from '@/contexts/Web3Context';
@@ -273,25 +274,19 @@ function TicketDetails() {
     }
   };
 
-  // Update ticket status
+// Update ticket status
   const handleUpdateStatus = async (newStatus: TicketStatus) => {
     if (!contract) return;
     setUpdating(true);
     try {
-      let tx;;
-
-      // Use specific contract functions for resolved and closed statuses
-      if (newStatus === TicketStatus.RESOLVED) {
-        tx = await contract.resolveTicket(ticketId);
-      } else if (newStatus === TicketStatus.CLOSED) {
-        tx = await contract.closeTicket(ticketId);
-      } else {
-        // Use updateStatus with index
-        let statusIdx = 0;
-        if(newStatus === TicketStatus.IN_PROGRESS) statusIdx = 1;
-        tx = await contract.updateStatus(ticketId, statusIdx);
-      }
+      // Map status to contract enum: Open=0, InProgress=1, Resolved=2, Closed=3
+      let statusIdx = 0;
+      if (newStatus === TicketStatus.IN_PROGRESS) statusIdx = 1;
+      else if (newStatus === TicketStatus.RESOLVED) statusIdx = 2;
+      else if (newStatus === TicketStatus.CLOSED) statusIdx = 3;
       
+      // Use updateStatus with manual gas limit to avoid estimation issues
+      const tx = await contract.updateStatus(ticketId, statusIdx, { gasLimit: 100000 });
       await tx.wait();
       addNotification({ type: 'success', title: 'Updated', message: `Status changed to ${newStatus}` });
       loadTicketDetails();
@@ -313,6 +308,23 @@ function TicketDetails() {
       addNotification({ type: 'success', title: 'Ticket Reassigned', message: 'Ticket has been reassigned successfully' });
       setShowReassignDialog(false);
       setReassignAddress('');
+      loadTicketDetails();
+      loadTicketHistory();
+    } catch (error: any) {
+      console.error(error);
+      addNotification({ type: 'error', title: 'Error', message: error.reason || error.message });
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleReopen = async () => {
+    if (!contract) return;
+    setUpdating(true);
+    try {
+      const tx = await contract.reopenTicket(ticketId, { gasLimit: 100000 });
+      await tx.wait();
+      addNotification({ type: 'success', title: 'Ticket Reopened', message: 'Ticket has been reopened and assigned to you' });
       loadTicketDetails();
       loadTicketHistory();
     } catch (error: any) {
@@ -410,8 +422,8 @@ function TicketDetails() {
               </Button>
             )}
 
-            {/* Button 2: Reassign (If ticket is assigned and user is Manager) */}
-            {ticket.assignedTo && isManager && ticket.status !== TicketStatus.CLOSED && (
+            {/* Button 2: Reassign (If ticket is assigned and user is Manager, not closed/resolved) */}
+            {ticket.assignedTo && isManager && ticket.status !== TicketStatus.CLOSED && ticket.status !== TicketStatus.RESOLVED && (
               <Button onClick={() => setShowReassignDialog(true)} disabled={updating} variant="outline" className="border-cyan-600 text-cyan-600 hover:bg-cyan-50">
                 <Users size={16} className="mr-2" /> Reassign
               </Button>
@@ -424,10 +436,22 @@ function TicketDetails() {
               </Button>
             )}
 
-            {/* Button 4: Close (If Resolved and Manager) */}
+            {/* Button 4: Reopen & Close (If Resolved and Manager) */}
             {ticket.status === TicketStatus.RESOLVED && isManager && (
-              <Button onClick={() => handleUpdateStatus(TicketStatus.CLOSED)} disabled={updating} variant="destructive">
-                <XCircle size={16} className="mr-2" /> Close Ticket
+              <>
+                <Button onClick={handleReopen} disabled={updating} className="bg-blue-600 hover:bg-blue-700">
+                  <RotateCcw size={16} className="mr-2" /> Reopen Ticket
+                </Button>
+                <Button onClick={() => handleUpdateStatus(TicketStatus.CLOSED)} disabled={updating} variant="destructive">
+                  <XCircle size={16} className="mr-2" /> Close Ticket
+                </Button>
+              </>
+            )}
+
+            {/* Button 5: Reopen (If Closed and Manager) */}
+            {ticket.status === TicketStatus.CLOSED && isManager && (
+              <Button onClick={handleReopen} disabled={updating} className="bg-blue-600 hover:bg-blue-700">
+                <RotateCcw size={16} className="mr-2" /> Reopen Ticket
               </Button>
             )}
           </div>
