@@ -3,10 +3,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite dev --port 3000",
+    "dev": "vite --port 3000",
     "build": "vite build",
     "serve": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "truffle": "cd blockchain && truffle compile && truffle migrate --reset && cd ..",
+    "migrate": "cd blockchain && truffle migrate --reset && cd ..",
+    "startup": "npm install && cd blockchain && truffle compile && truffle migrate --reset && cd .. && vite --port 3000"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.2.4",
@@ -38,7 +41,7 @@
     "@vitejs/plugin-react": "^5.0.4",
     "jsdom": "^27.0.0",
     "typescript": "^5.7.2",
-    "vite": "^7.2.4",
+    "vite": "^7.1.7",
     "vitest": "^3.0.5",
     "web-vitals": "^5.1.0"
   }

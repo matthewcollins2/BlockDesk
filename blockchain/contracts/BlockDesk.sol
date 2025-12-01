@@ -135,11 +135,12 @@ contract BlockDesk {
             "Only closed or resolved tickets can be reopened"
         );
 
-        tickets[ticketId].status = TicketStatus.Open;
-        tickets[ticketId].assignedTo = address(0);
+        tickets[ticketId].status = TicketStatus.InProgress;
+        tickets[ticketId].assignedTo = msg.sender;
         tickets[ticketId].updatedAt = uint64(block.timestamp);
         
         emit TicketReopened(ticketId, msg.sender);
+        emit TicketAssigned(ticketId, msg.sender, msg.sender);
     }
     
     function addComment(uint256 ticketId, string memory content) external {
