@@ -165,54 +165,30 @@ function App() {
       </div>
 
       {/* Technology Stack */}
-      <div className="container mx-auto px-4 py-16">
-        <h2 className="text-3xl font-bold text-center text-gray-900 mb-12">
-          Built With Modern Technology
-        </h2>
-        
-        <div className="bg-white rounded-lg shadow-lg p-8">
+      <div className="bg-cyan-600 text-white py-16">
+        <div className="container mx-auto px-4">
+          <h2 className="text-3xl font-bold text-center mb-12">
+            Built With Modern Technology
+          </h2>
+          
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 text-center">
-            <div>
-              <h3 className="font-semibold text-gray-900 mb-2">Blockchain</h3>
-              <p className="text-sm text-gray-600">Ethereum & Smart Contracts</p>
+            <div className="bg-white/10 backdrop-blur-sm rounded-lg p-6 hover:bg-white/20 transition-colors">
+              <h3 className="font-semibold mb-2">Blockchain</h3>
+              <p className="text-sm text-cyan-100">Ethereum & Smart Contracts</p>
             </div>
-            <div>
-              <h3 className="font-semibold text-gray-900 mb-2">Storage</h3>
-              <p className="text-sm text-gray-600">IPFS Decentralized Storage</p>
+            <div className="bg-white/10 backdrop-blur-sm rounded-lg p-6 hover:bg-white/20 transition-colors">
+              <h3 className="font-semibold mb-2">Storage</h3>
+              <p className="text-sm text-cyan-100">IPFS Decentralized Storage</p>
             </div>
-            <div>
-              <h3 className="font-semibold text-gray-900 mb-2">Wallet</h3>
-              <p className="text-sm text-gray-600">MetaMask Integration</p>
+            <div className="bg-white/10 backdrop-blur-sm rounded-lg p-6 hover:bg-white/20 transition-colors">
+              <h3 className="font-semibold mb-2">Wallet</h3>
+              <p className="text-sm text-cyan-100">MetaMask Integration</p>
             </div>
-            <div>
-              <h3 className="font-semibold text-gray-900 mb-2">Frontend</h3>
-              <p className="text-sm text-gray-600">React & TanStack Router</p>
+            <div className="bg-white/10 backdrop-blur-sm rounded-lg p-6 hover:bg-white/20 transition-colors">
+              <h3 className="font-semibold mb-2">Frontend</h3>
+              <p className="text-sm text-cyan-100">React & TanStack Router</p>
             </div>
           </div>
-        </div>
-      </div>
-
-      {/* Call to Action */}
-      <div className="bg-cyan-600 text-white py-16">
-        <div className="container mx-auto px-4 text-center">
-          <h2 className="text-3xl font-bold mb-4">
-            Ready to Experience Decentralized IT Support?
-          </h2>
-          <p className="text-xl mb-8 text-cyan-100">
-            Join the future of transparent and secure ticket management
-          </p>
-          
-          {isConnected && user ? (
-            <Link to="/create-ticket">
-              <Button size="lg" variant="secondary">
-                Create Your First Ticket
-              </Button>
-            </Link>
-          ) : (
-            <Button size="lg" variant="secondary" disabled>
-              Connect Wallet to Get Started
-            </Button>
-          )}
         </div>
       </div>
 
