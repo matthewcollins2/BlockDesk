@@ -9,9 +9,7 @@ export async function uploadToIPFS(file: File) {
 
   const res = await fetch("https://api.pinata.cloud/pinning/pinFileToIPFS", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${PINATA_JWT}`
-    },
+    headers: { Authorization: `Bearer ${PINATA_JWT}` },
     body: form
   });
 
@@ -20,7 +18,7 @@ export async function uploadToIPFS(file: File) {
   const data = await res.json();
   return {
     hash: data.IpfsHash,
-    url: `${PINATA_GATEWAY}${data.IpfsHash}`
+    url: getIPFSUrl(data.IpfsHash)
   };
 }
 
@@ -33,9 +31,7 @@ export async function uploadTextToIPFS(text: string) {
 
   const res = await fetch("https://api.pinata.cloud/pinning/pinFileToIPFS", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${PINATA_JWT}`
-    },
+    headers: { Authorization: `Bearer ${PINATA_JWT}` },
     body: form
   });
 
@@ -44,6 +40,15 @@ export async function uploadTextToIPFS(text: string) {
   const data = await res.json();
   return {
     hash: data.IpfsHash,
-    url: `${PINATA_GATEWAY}${data.IpfsHash}`
+    url: getIPFSUrl(data.IpfsHash)
   };
+}
+
+export function isIPFSHash(str: string): boolean {
+  return /^[A-Za-z0-9]{46,}$/.test(str);
+}
+
+export function getIPFSUrl(cid: string): string {
+  if (!cid) return "";
+  return `${PINATA_GATEWAY}${cid}`;
 }
