@@ -1,5 +1,7 @@
-// IPFS utility functions
-// Using browser-based approach with base64 encoding for demo purposes
+const PINATA_JWT = import.meta.env.VITE_PINATA_JWT;
+const PINATA_GATEWAY =
+  import.meta.env.VITE_PINATA_GATEWAY ||
+  "https://emerald-elegant-wolf-980.mypinata.cloud/ipfs/";
 
 export interface IPFSUploadResult {
   hash: string;
@@ -45,39 +47,37 @@ export async function uploadToIPFS(file: File): Promise<IPFSUploadResult> {
   }
 }
 
-/**
- * Convert file to base64 data URL
- */
-function fileToDataURL(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => resolve(e.target?.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
+  const res = await fetch("https://api.pinata.cloud/pinning/pinFileToIPFS", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${PINATA_JWT}`,
+    },
+    body: form,
   });
+
+  if (!res.ok) throw new Error("Pinata file upload failed");
+
+  const data = await res.json();
+  return {
+    hash: data.IpfsHash,
+    url: `${PINATA_GATEWAY}${data.IpfsHash}`,
+  };
 }
 
-/**
- * Get IPFS URL from hash
- * For demo mode, checks localStorage for stored data URL
- */
-export function getIPFSUrl(hash: string): string {
-  if (!hash) return '';
-  
-  // If it's already a data URL, return it directly
-  if (hash.startsWith('data:')) {
-    return hash;
-  }
-  
-  // Check localStorage for stored data URL
-  const storedDataUrl = localStorage.getItem(`ipfs_${hash}`);
-  if (storedDataUrl) {
-    return storedDataUrl;
-  }
-  
-  // Otherwise treat as IPFS hash (won't work in demo mode)
-  return `https://ipfs.io/ipfs/${hash.replace('ipfs://', '')}`;
-}
+export async function uploadTextToIPFS(text: string) {
+  if (!PINATA_JWT) throw new Error("Missing Pinata JWT");
+
+  const blob = new Blob([text], { type: "text/plain" });
+  const form = new FormData();
+  form.append("file", blob, "content.txt");
+
+  const res = await fetch("https://api.pinata.cloud/pinning/pinFileToIPFS", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${PINATA_JWT}`,
+    },
+    body: form,
+  });
 
 /**
  * Upload text/JSON to IPFS
@@ -88,24 +88,19 @@ export async function uploadTextToIPFS(text: string): Promise<IPFSUploadResult> 
   return uploadToIPFS(file);
 }
 
-/**
- * Check if string is an IPFS hash
- */
-export function isIPFSHash(str: string): boolean {
-  // Check for both IPFS hash format and data URLs
-  // Using hex-based mock CIDs for demo, so accept 0-9a-f characters
-  return /^(Qm[0-9a-fA-F]{44}|bafy[a-zA-Z0-9]{50,}|data:)/.test(str);
+  const data = await res.json();
+  return {
+    hash: data.IpfsHash,
+    url: `${PINATA_GATEWAY}${data.IpfsHash}`,
+  };
 }
 
-// NOTE: This is a demo implementation using base64 data URLs
-// For production with real IPFS:
-// 
-// 1. Sign up for web3.storage (free): https://web3.storage/
-// 2. Get API token
-// 3. Replace uploadToIPFS with:
-//    import { Web3Storage } from 'web3.storage'
-//    const client = new Web3Storage({ token: 'YOUR_TOKEN' })
-//    const cid = await client.put([file])
-//    return { hash: cid, url: `https://ipfs.io/ipfs/${cid}` }
-//
-// OR use NFT.Storage which doesn't require API key for uploads
+export function getIPFSUrl(hash: string): string {
+  if (!hash) return "";
+  if (hash.startsWith("http")) return hash;
+  return `${PINATA_GATEWAY}${hash.replace("ipfs://", "")}`;
+}
+
+export function isIPFSHash(str: string): boolean {
+  return /^Qm[1-9A-Za-z]{44}|bafy[A-Za-z0-9]{50,}/.test(str);
+}
