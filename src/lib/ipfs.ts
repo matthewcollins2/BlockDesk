@@ -3,6 +3,17 @@
 const PINATA_JWT = import.meta.env.VITE_PINATA_JWT;
 const PINATA_GATEWAY =
   import.meta.env.VITE_PINATA_GATEWAY || "https://gateway.pinata.cloud/ipfs/";
+
+// Helper to convert File to Base64/DataURL
+const readFileAsDataURL = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+};
+
 export async function uploadToIPFS(file: File) {
   if (!PINATA_JWT) throw new Error("Missing Pinata JWT");
 
@@ -18,9 +29,14 @@ export async function uploadToIPFS(file: File) {
   if (!res.ok) throw new Error("Pinata file upload failed");
 
   const data = await res.json();
+  
+  // Generate Data URL for local caching
+  const dataUrl = await readFileAsDataURL(file);
+
   return {
     hash: data.IpfsHash,
-    url: getIPFSUrl(data.IpfsHash)
+    url: getIPFSUrl(data.IpfsHash),
+    dataUrl // Return this so the frontend can cache it
   };
 }
 

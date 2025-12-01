@@ -14,7 +14,10 @@ import {
   MessageSquare,
   Send,
   Users,
-  RotateCcw
+  RotateCcw,
+  Monitor,
+  Hash,
+  AlertTriangle
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useWeb3 } from '@/contexts/Web3Context';
@@ -44,6 +47,9 @@ function TicketDetails() {
   const [descriptionFromIPFS, setDescriptionFromIPFS] = useState(false);
   const [showReassignDialog, setShowReassignDialog] = useState(false);
   const [reassignAddress, setReassignAddress] = useState('');
+  
+  // NEW: State for attachment URL (handles local cache vs gateway)
+  const [attachmentUrl, setAttachmentUrl] = useState('');
 
   // Load ticket data when component mounts or ticketId/contract changes
   useEffect(() => {
@@ -54,22 +60,32 @@ function TicketDetails() {
     }
   }, [ticketId, contract]);
 
+  // NEW: Effect to resolve attachment URL
+  useEffect(() => {
+    if (ticket?.attachment && isIPFSHash(ticket.attachment)) {
+      // 1. Try to get instant preview from localStorage
+      const cached = localStorage.getItem(`ipfs_${ticket.attachment}`);
+      if (cached) {
+        setAttachmentUrl(cached);
+      } else {
+        // 2. Fallback to IPFS Gateway
+        setAttachmentUrl(getIPFSUrl(ticket.attachment));
+      }
+    }
+  }, [ticket]);
+
   // Fetch ticket details from blockchain and IPFS
   const loadTicketDetails = async () => {
     setLoading(true);
     try {
       if (!contract) return;
       
-      // Fetch "Live" State Data from Smart Contract
-      // This is cheap and fast, but lacks the title and description now
       const rawTicket = await contract.getTicket(ticketId);
       
       if (rawTicket.id.toString() === "0") {
         throw new Error('Ticket not found');
       }
 
-      // Fetch Static Data from Event Logs
-      // We look for the "TicketCreated" event for this specific ID
       const filter = contract.filters.TicketCreated(ticketId);
       const events = await contract.queryFilter(filter);
 
@@ -77,8 +93,6 @@ function TicketDetails() {
         throw new Error('Ticket creation event not found');
       }
 
-      // Extract data from the event arguments
-      // events[0].args contains [ticketId, creator, attachmentHash]
       const eventArgs = (events[0] as any).args;
       const titleFromEvent = eventArgs.title;
       const descriptionFromEvent = eventArgs.description;
@@ -96,16 +110,11 @@ function TicketDetails() {
         }
       }
 
-      // Merge Data (State and Event)
       const formattedTicket: Ticket = {
         id: rawTicket.id.toString(),
-        
-        // Data from Event 
         title: titleFromEvent,
         description: descriptionText,
         attachment: attachmentFromEvent,
-        
-        // Data from Struct
         status: mapStatus(Number(rawTicket.status)) as TicketStatus,
         creator: rawTicket.creator,
         assignedTo: rawTicket.assignedTo === '0x0000000000000000000000000000000000000000' 
@@ -124,16 +133,40 @@ function TicketDetails() {
     }
   };
 
-  // Fetch ticket history from blockchain event logs
+  // Helper to safely parse potentially JSON description
+  const getTicketMetadata = (desc: string) => {
+    try {
+      const parsed = JSON.parse(desc);
+      if (parsed && typeof parsed === 'object' && 'description' in parsed) {
+        return {
+          isStructured: true,
+          description: parsed.description || '',
+          issueType: parsed.issueType,
+          equipmentType: parsed.equipmentType,
+          serialNumber: parsed.serialNumber,
+          remedialAction: parsed.remedialAction
+        };
+      }
+    } catch (e) {
+      // Not JSON, fall back to plain text
+    }
+    return {
+      isStructured: false,
+      description: desc,
+      issueType: null,
+      equipmentType: null,
+      serialNumber: null,
+      remedialAction: null
+    };
+  };
+
   const loadTicketHistory = async () => {
     if (!contract) return;
     try {
-      // Set up filters to query events for this specific ticket
       const filterCreated = contract.filters.TicketCreated(ticketId);
       const filterStatus = contract.filters.StatusUpdated(ticketId);
       const filterAssigned = contract.filters.TicketAssigned(ticketId);
 
-      // Query all event types in parallel
       const [createdLogs, statusLogs, assignedLogs] = await Promise.all([
         contract.queryFilter(filterCreated),
         contract.queryFilter(filterStatus),
@@ -142,7 +175,6 @@ function TicketDetails() {
 
       const events: TicketEvent[] = [];
 
-      // Process ticket creation events
       for (const log of createdLogs) {
         const block = await log.getBlock();
         events.push({
@@ -155,7 +187,6 @@ function TicketDetails() {
         });
       }
 
-      // Process status change events (Open -> In Progress -> Resolved -> Closed -> etc)
       for (const log of statusLogs) {
         const block = await log.getBlock();
         const statusIdx = Number((log as any).args[1]);
@@ -169,7 +200,6 @@ function TicketDetails() {
         });
       }
 
-      // Process ticket assignment and reassignment events
       for (const log of assignedLogs) {
         const block = await log.getBlock();
         events.push({
@@ -183,23 +213,19 @@ function TicketDetails() {
         });
       }
 
-      // Sort events by timestamp
       setTicketEvents(events.sort((a, b) => b.timestamp - a.timestamp));
     } catch (e) {
       console.warn("Could not fetch history:", e);
     }
   };
 
-  // Fetch all comments for this ticket from blockchain and IPFS
   const loadComments = async () => {
     if (!contract) return;
     try {
-      // Get comment data from smart contract
       const rawComments = await contract.getTicketComments(ticketId);
       const formattedComments: Comment[] = rawComments.map((c: any) => {
         let commentText = c.content;
         
-        // Comment content is stored as IPFS hash. (TEMP) retrieve actual text from localStorage
         if (c.content.startsWith('Qm')) {
           const stored = localStorage.getItem(`ipfs_${c.content}`);
           if (stored) {
@@ -216,36 +242,26 @@ function TicketDetails() {
         };
       });
       setComments(formattedComments);
-      
-      // Log how many comments were loaded from IPFS
-      const ipfsCount = formattedComments.filter(c => rawComments.find((rc: any) => rc.id.toString() === c.id)?.content.startsWith('Qm')).length;
-      if (ipfsCount > 0) {
-        console.log(`✓ ${ipfsCount} comment(s) loaded from IPFS`);
-      }
     } catch (e) {
       console.warn("Could not fetch comments:", e);
     }
   };
 
-  // Submit a new comment, uploads to IPFS then stores hash on blockchain
   const handleAddComment = async () => {
     if (!contract || !newComment.trim()) return;
     setSubmittingComment(true);
     try {
-      // First, upload comment text to IPFS and get hash
       const commentResult = await uploadTextToIPFS(newComment);
       const commentHash = commentResult.hash;
       
-      // Store actual comment text in localStorage
       localStorage.setItem(`ipfs_${commentHash}`, newComment);
       console.log('✓ Comment uploaded to IPFS');
       
-      // Store only the IPFS hash on blockchain to save gas
       const tx = await contract.addComment(ticketId, commentHash);
       await tx.wait();
       addNotification({ type: 'success', title: 'Comment Added', message: 'Your comment has been posted' });
       setNewComment('');
-      loadComments(); // Refresh comment list
+      loadComments();
     } catch (error: any) {
       console.error(error);
       addNotification({ type: 'error', title: 'Error', message: error.reason || error.message });
@@ -254,12 +270,10 @@ function TicketDetails() {
     }
   };
 
-  // User clicks "Start Work"
   const handleStartWork = async () => {
     if (!contract || !user) return;
     setUpdating(true);
     try {
-      // This sets status to InProgress and assignedTo to user
       const tx = await contract.assignTicket(ticketId, user.address);
       await tx.wait();
       
@@ -274,18 +288,15 @@ function TicketDetails() {
     }
   };
 
-// Update ticket status
   const handleUpdateStatus = async (newStatus: TicketStatus) => {
     if (!contract) return;
     setUpdating(true);
     try {
-      // Map status to contract enum: Open=0, InProgress=1, Resolved=2, Closed=3
       let statusIdx = 0;
       if (newStatus === TicketStatus.IN_PROGRESS) statusIdx = 1;
       else if (newStatus === TicketStatus.RESOLVED) statusIdx = 2;
       else if (newStatus === TicketStatus.CLOSED) statusIdx = 3;
       
-      // Use updateStatus with manual gas limit to avoid estimation issues
       const tx = await contract.updateStatus(ticketId, statusIdx, { gasLimit: 100000 });
       await tx.wait();
       addNotification({ type: 'success', title: 'Updated', message: `Status changed to ${newStatus}` });
@@ -390,8 +401,10 @@ function TicketDetails() {
   }
 
   const isManager = user.role === UserRole.MANAGER;
-  // If assigned to current user, they can work on it
   const isAssignedToMe = ticket.assignedTo?.toLowerCase() === user.address.toLowerCase();
+  
+  // Parse metadata for rendering
+  const metadata = getTicketMetadata(ticket.description);
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -415,28 +428,24 @@ function TicketDetails() {
 
           {/* Action Buttons */}
           <div className="flex gap-2">
-            {/* Button 1: Start Work (Assignments are automatic) */}
             {ticket.status === TicketStatus.OPEN && isManager && (
               <Button onClick={handleStartWork} disabled={updating} className="bg-cyan-600 hover:bg-cyan-700">
                 <Play size={16} className="mr-2" /> Start Work
               </Button>
             )}
 
-            {/* Button 2: Reassign (If ticket is assigned and user is Manager, not closed/resolved) */}
             {ticket.assignedTo && isManager && ticket.status !== TicketStatus.CLOSED && ticket.status !== TicketStatus.RESOLVED && (
               <Button onClick={() => setShowReassignDialog(true)} disabled={updating} variant="outline" className="border-cyan-600 text-cyan-600 hover:bg-cyan-50">
                 <Users size={16} className="mr-2" /> Reassign
               </Button>
             )}
 
-            {/* Button 3: Resolve (If In Progress and Assigned to Me or Manager) */}
             {ticket.status === TicketStatus.IN_PROGRESS && (isAssignedToMe || isManager) && (
               <Button onClick={() => handleUpdateStatus(TicketStatus.RESOLVED)} disabled={updating} className="bg-green-600 hover:bg-green-700">
                 <CheckCircle size={16} className="mr-2" /> Resolve Ticket
               </Button>
             )}
 
-            {/* Button 4: Reopen & Close (If Resolved and Manager) */}
             {ticket.status === TicketStatus.RESOLVED && isManager && (
               <>
                 <Button onClick={handleReopen} disabled={updating} className="bg-blue-600 hover:bg-blue-700">
@@ -448,7 +457,6 @@ function TicketDetails() {
               </>
             )}
 
-            {/* Button 5: Reopen (If Closed and Manager) */}
             {ticket.status === TicketStatus.CLOSED && isManager && (
               <Button onClick={handleReopen} disabled={updating} className="bg-blue-600 hover:bg-blue-700">
                 <RotateCcw size={16} className="mr-2" /> Reopen Ticket
@@ -463,24 +471,62 @@ function TicketDetails() {
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-white rounded-lg shadow-sm border p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              Description
+              Request Details
               {descriptionFromIPFS && (
                 <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded font-normal">IPFS</span>
               )}
             </h2>
-            <p className="text-gray-700 whitespace-pre-wrap leading-relaxed">
-              {ticket.description}
-            </p>
+
+            {/* Structured Metadata Grid */}
+            {metadata.isStructured && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 bg-gray-50 p-4 rounded-lg border">
+                <div>
+                  <div className="flex items-center gap-1.5 text-gray-500 mb-1">
+                    <AlertTriangle size={14} />
+                    <span className="text-xs font-medium uppercase tracking-wider">Issue Type</span>
+                  </div>
+                  <p className="text-sm font-medium text-gray-900">{metadata.issueType}</p>
+                </div>
+                <div>
+                  <div className="flex items-center gap-1.5 text-gray-500 mb-1">
+                    <Monitor size={14} />
+                    <span className="text-xs font-medium uppercase tracking-wider">Equipment</span>
+                  </div>
+                  <p className="text-sm font-medium text-gray-900">{metadata.equipmentType}</p>
+                </div>
+                <div>
+                  <div className="flex items-center gap-1.5 text-gray-500 mb-1">
+                    <Hash size={14} />
+                    <span className="text-xs font-medium uppercase tracking-wider">Serial Number</span>
+                  </div>
+                  <p className="text-sm font-mono text-gray-900">{metadata.serialNumber}</p>
+                </div>
+              </div>
+            )}
+
+            <div className="mb-4">
+              <h3 className="text-sm font-medium text-gray-500 mb-2">Description</h3>
+              <p className="text-gray-700 whitespace-pre-wrap leading-relaxed">
+                {metadata.description}
+              </p>
+            </div>
+
+            {/* Remedial Action (if exists) */}
+            {metadata.remedialAction && (
+              <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-100">
+                <h3 className="text-sm font-semibold text-blue-900 mb-1">Remedial Action Taken</h3>
+                <p className="text-sm text-blue-800 whitespace-pre-wrap">{metadata.remedialAction}</p>
+              </div>
+            )}
             
             {ticket.attachment && (
-              <div className="mt-4 pt-4 border-t">
+              <div className="mt-6 pt-4 border-t">
                 <h3 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
                   Attachment
                   <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded font-normal">IPFS</span>
                 </h3>
                 {isIPFSHash(ticket.attachment) ? (
                   <div className="space-y-3">
-                    {/* IPFS File Preview */}
                     <div className="flex items-center gap-2 p-3 bg-gray-50 rounded border">
                       <Paperclip size={16} className="text-gray-500 flex-shrink-0" />
                       <div className="flex-1 min-w-0">
@@ -489,20 +535,15 @@ function TicketDetails() {
                       </div>
                     </div>
                     
-                    {/* Image Preview (if it's an image) */}
                     <div className="border rounded-lg overflow-hidden bg-gray-50">
                       <div className="p-4">
-                        <p className="text-xs text-gray-500 mb-2">Attachment:</p>
+                        <p className="text-xs text-gray-500 mb-2">Preview:</p>
+                        {/* UPDATED: Use attachmentUrl state which handles local cache */}
                         <img 
-                          src={getIPFSUrl(ticket.attachment)} 
+                          src={attachmentUrl} 
                           alt="Ticket attachment" 
                           className="max-w-full h-auto rounded"
-                          onLoad={() => {
-                            console.log('Image loaded successfully!');
-                          }}
                           onError={(e) => {
-                            console.error('Image failed to load');
-                            // Hide image if it fails to load (not an image)
                             e.currentTarget.style.display = 'none';
                           }}
                         />
@@ -529,7 +570,6 @@ function TicketDetails() {
               Comments ({comments.length})
             </h2>
             
-            {/* Add Comment Form */}
             <div className="mb-6 pb-6 border-b">
               <textarea
                 value={newComment}
@@ -555,7 +595,6 @@ function TicketDetails() {
               </div>
             </div>
 
-            {/* Comments List */}
             <div className="space-y-4">
               {comments.length === 0 ? (
                 <p className="text-sm text-gray-500 text-center py-4">No comments yet. Be the first to comment!</p>
